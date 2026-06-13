@@ -5,9 +5,20 @@ import Clay from 'pebble-clay';
 import clayConfig from './config_clay';
 import timerListComponent from './config_timer_list';
 import { timerListToString } from './timer_config';
+import { resendDict } from './config_sync';
 
 const clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 clay.registerComponent(timerListComponent);
+
+// The watch requests its config on launch (any inbound AppMessage); reply with
+// the last-saved values so config reaches the app even when it wasn't open at
+// Save time. See config_sync.ts for why a watchapp needs this handshake.
+Pebble.addEventListener('appmessage', () => {
+  const dict = resendDict((k) => window.localStorage.getItem(k));
+  if (!dict) { return; }
+  Pebble.sendAppMessage(dict, () => { console.log('config resent'); },
+    () => { console.log('config resend failed'); });
+});
 
 Pebble.addEventListener('showConfiguration', () => {
   Pebble.openURL(clay.generateUrl());
@@ -24,6 +35,9 @@ Pebble.addEventListener('webviewclosed', (e: any) => {
   const dict: Record<string, any> = {};
   dict.TimerConfig = timerListToString(s.TimerList);
   dict.SortOrder = parseInt(s.SortOrder, 10) || 0;
+  // persist so we can re-send when the watchapp later launches and asks (above)
+  window.localStorage.setItem('timer_config', dict.TimerConfig);
+  window.localStorage.setItem('sort_order', String(dict.SortOrder));
   console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder);
   Pebble.sendAppMessage(dict, () => { console.log('config sent'); },
     () => { console.log('config send failed'); });

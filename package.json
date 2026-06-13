@@ -15,7 +15,7 @@
     "targetPlatforms": ["aplite", "basalt", "chalk", "diorite", "emery", "flint", "gabbro"],
     "capabilities": [],
     "watchapp": { "watchface": false },
-    "messageKeys": ["TimerConfig", "SortOrder"],
+    "messageKeys": ["TimerConfig", "SortOrder", "Request"],
     "resources": { "media": [] }
   },
   "devDependencies": {

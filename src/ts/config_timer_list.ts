@@ -21,6 +21,19 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
     return v;
   }
 
+  // Build <option> 0..max, marking `sel` selected (and including sel as an extra
+  // option if it somehow exceeds max, so a stored value is never silently lost).
+  function selOptions(max: number, sel: number): string {
+    let html = '';
+    let found = false;
+    for (let i = 0; i <= max; i++) {
+      if (i === sel) { found = true; }
+      html += '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + i + '</option>';
+    }
+    if (!found) { html += '<option value="' + sel + '" selected>' + sel + '</option>'; }
+    return html;
+  }
+
   function rowHtml(name: string, h: number, m: number, s: number): string {
     // textarea-safe: escape the name into the value attribute
     const safe = ('' + name).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
@@ -28,9 +41,9 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
     return '<div class="tl-row">' +
       '<input class="tl-name" type="text" placeholder="Name" value="' + safe + '">' +
       '<div class="tl-dur">' +
-      '<input class="tl-h" type="number" min="0" max="99" value="' + h + '"><span>h</span>' +
-      '<input class="tl-m" type="number" min="0" max="59" value="' + m + '"><span>m</span>' +
-      '<input class="tl-s" type="number" min="0" max="59" value="' + s + '"><span>s</span>' +
+      '<select class="tl-h">' + selOptions(23, h) + '</select><span>h</span>' +
+      '<select class="tl-m">' + selOptions(59, m) + '</select><span>m</span>' +
+      '<select class="tl-s">' + selOptions(59, s) + '</select><span>s</span>' +
       '<button type="button" class="tl-del" title="Remove">&#10005;</button>' +
       '</div></div>';
   }
@@ -41,10 +54,10 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] as HTMLElement;
       const name = (r.querySelector('.tl-name') as HTMLInputElement).value;
-      const h = parseInt((r.querySelector('.tl-h') as HTMLInputElement).value, 10) || 0;
-      const m = parseInt((r.querySelector('.tl-m') as HTMLInputElement).value, 10) || 0;
-      const s = parseInt((r.querySelector('.tl-s') as HTMLInputElement).value, 10) || 0;
-      out.push({ name: name, seconds: clamp(h, 0, 99) * 3600 + clamp(m, 0, 59) * 60 + clamp(s, 0, 59) });
+      const h = parseInt((r.querySelector('.tl-h') as HTMLSelectElement).value, 10) || 0;
+      const m = parseInt((r.querySelector('.tl-m') as HTMLSelectElement).value, 10) || 0;
+      const s = parseInt((r.querySelector('.tl-s') as HTMLSelectElement).value, 10) || 0;
+      out.push({ name: name, seconds: clamp(h, 0, 23) * 3600 + clamp(m, 0, 59) * 60 + clamp(s, 0, 59) });
     }
     return out;
   }
@@ -117,7 +130,7 @@ const timerListComponent = {
     '.tl-name{display:block;width:100%;box-sizing:border-box;height:2.8rem;margin:0 0 4px 0;' +
       'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.5rem;color-scheme:dark}' +
     '.tl-dur{display:flex;align-items:center}' +
-    '.tl-dur input{flex:1 1 auto;min-width:0;width:3rem;height:2.8rem;margin:0 2px 0 0;text-align:right;' +
+    '.tl-dur select{flex:1 1 auto;min-width:0;width:3rem;height:2.8rem;margin:0 2px 0 0;' +
       'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.3rem;color-scheme:dark}' +
     '.tl-dur span{flex:0 0 auto;margin:0 6px 0 0;color:#fff}' +
     '.tl-dur button{flex:0 0 auto;min-width:0;width:2.8rem;height:2.8rem;margin:0 0 0 6px;padding:0}' +

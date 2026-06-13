@@ -135,8 +135,13 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   int idx = s_order[ci->row];
   Timer *t = &s_timers[idx];
   char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
-  char sub[40]; snprintf(sub, sizeof(sub), "%s  %s", rem, state_label(t->state));
-  menu_cell_basic_draw(gctx, cell, t->name[0] ? t->name : "(unnamed)", sub, NULL);
+  if (t->name[0]) {
+    char sub[40]; snprintf(sub, sizeof(sub), "%s  %s", rem, state_label(t->state));
+    menu_cell_basic_draw(gctx, cell, t->name, sub, NULL);
+  } else {
+    // No name configured: show the time as the title, state as the subtitle.
+    menu_cell_basic_draw(gctx, cell, rem, state_label(t->state), NULL);
+  }
 }
 
 static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
@@ -165,6 +170,17 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     persist_all(); rearm_wakeup(); ensure_ticking();
   }
   reload_ui();
+}
+
+// Ask the phone for the current config. A watchapp only receives AppMessages
+// while running, so config saved on the phone while this app was closed never
+// arrived; on launch we request it and the phone replies (see config_sync.ts).
+static void request_config(void) {
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) == APP_MSG_OK) {
+    dict_write_uint8(out, MESSAGE_KEY_Request, 1);
+    app_message_outbox_send();
+  }
 }
 
 // ---- window ----
@@ -205,6 +221,7 @@ static void init(void) {
 
   app_message_register_inbox_received(inbox_received);
   app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+  request_config();   // pull config from the phone (covers app-closed-at-Save case)
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload });
