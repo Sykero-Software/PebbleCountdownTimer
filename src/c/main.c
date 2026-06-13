@@ -168,6 +168,19 @@ static void ensure_ticking(void) {
 // ---- ActionMenu: Start/Pause + Reset for the selected timer ----
 static ActionMenuLevel *s_action_root;
 
+// After acting on a timer it re-sorts (e.g. floats to the top in MRU mode); move
+// the menu cursor to follow it to its new row so the user needn't scroll to it.
+static void select_timer_row(int idx) {
+  if (!s_menu) { return; }
+  for (int row = 0; row < s_count; row++) {
+    if (s_order[row] == idx) {
+      menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = 0, .row = (uint16_t)row },
+                                    MenuRowAlignTop, false);
+      return;
+    }
+  }
+}
+
 static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   int idx = (int)(intptr_t)action_menu_get_context(am);
   if (idx < 0 || idx >= s_count) { return; }
@@ -175,6 +188,7 @@ static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
   else { tc_start(t, now_s()); }
   persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+  select_timer_row(idx);
 }
 
 static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
@@ -182,6 +196,7 @@ static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   if (idx < 0 || idx >= s_count) { return; }
   tc_reset(&s_timers[idx], now_s());
   persist_all(); rearm_wakeup(); reload_ui();
+  select_timer_row(idx);
 }
 
 // Free the level hierarchy after the menu closes (else it leaks per open).
