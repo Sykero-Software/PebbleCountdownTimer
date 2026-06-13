@@ -43,11 +43,12 @@ app is not in the foreground.
 
 ## Configuration (Clay, phone-side)
 
-A single **reorderable list** custom component, modeled on TimeStyle's
-`config_widget_list` (`src/ts/config_widget_list.ts`):
+A single **variable-length list** custom component, modeled on TimeStyle's
+`config_widget_list` (`src/ts/config_widget_list.ts`) but **without reordering** —
+list order is irrelevant since the watch sorts by most-recently-used:
 
 - Each row: **name** text input + **duration** as three small number fields
-  (HH / MM / SS) + **↑ / ↓ / ✕** controls.
+  (HH / MM / SS) + a **✕** (remove) control. No ↑/↓.
 - An **"Add timer"** button; **max 8** rows (hide Add at 8).
 - Value = ordered array of `{ name: string, seconds: number }`.
 - Clay-`toSource()` rules (same as TimeStyle's custom component & custom fn): the
