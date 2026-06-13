@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Tuomas Airaksinen
+#include "timer_calc.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void copy_name(char *dst, const char *src, size_t srclen) {
+  size_t n = srclen < NAME_LEN ? srclen : NAME_LEN;
+  memcpy(dst, src, n);
+  dst[n] = '\0';
+}
+
+int tc_parse_config(const char *buf, Timer *out, int max) {
+  int count = 0;
+  if (!buf || buf[0] == '\0') { return 0; }
+  const char *p = buf;
+  while (*p && count < max) {
+    const char *rec_end = strchr(p, '\x1e');
+    const char *limit = rec_end ? rec_end : (p + strlen(p));
+    const char *us = (const char *)memchr(p, '\x1f', (size_t)(limit - p));
+    if (us) {
+      int32_t seconds = (int32_t)strtol(us + 1, NULL, 10);
+      if (seconds >= 1) {
+        Timer *t = &out[count];
+        memset(t, 0, sizeof(*t));
+        copy_name(t->name, p, (size_t)(us - p));
+        t->duration = seconds;
+        t->state = TS_IDLE;
+        t->remaining = seconds;
+        count++;
+      }
+    }
+    if (!rec_end) { break; }
+    p = rec_end + 1;
+  }
+  return count;
+}
+
+void tc_format_remaining(char *buf, size_t n, int32_t secs) {
+  if (secs < 0) { secs = 0; }
+  int h = secs / 3600;
+  int m = (secs % 3600) / 60;
+  int s = secs % 60;
+  if (h > 0) { snprintf(buf, n, "%d:%02d:%02d", h, m, s); }
+  else { snprintf(buf, n, "%d:%02d", m, s); }
+}
+
+int32_t tc_remaining_now(const Timer *t, int64_t now) {
+  if (t->state == TS_RUNNING) {
+    int64_t r = t->end_time - now;
+    if (r < 0) { r = 0; }
+    return (int32_t)r;
+  }
+  return t->remaining;
+}
+
+bool tc_soonest_end(const Timer *t, int count, int64_t *out) {
+  bool found = false;
+  int64_t best = 0;
+  for (int i = 0; i < count; i++) {
+    if (t[i].state == TS_RUNNING) {
+      if (!found || t[i].end_time < best) { best = t[i].end_time; found = true; }
+    }
+  }
+  if (found && out) { *out = best; }
+  return found;
+}
+
+// Comparison key for a timer under `mode`. Returns a 64-bit value; the sort puts
+// HIGHER keys first, so we negate where the mode wants ascending order.
+static int64_t order_key(const Timer *t, SortMode mode, int64_t now) {
+  if (mode == SORT_SHORTEST) { return -(int64_t)tc_remaining_now(t, now); } // asc -> negate
+  if (mode == SORT_LONGEST)  { return  (int64_t)tc_remaining_now(t, now); } // desc
+  return t->last_used;                                                       // MRU: desc
+}
+
+void tc_display_order(const Timer *t, int count, SortMode mode, int64_t now, int *order) {
+  for (int i = 0; i < count; i++) { order[i] = i; }
+  // stable insertion sort: higher order_key first, ties keep ascending index
+  for (int i = 1; i < count; i++) {
+    int key = order[i];
+    int64_t kv = order_key(&t[key], mode, now);
+    int j = i - 1;
+    while (j >= 0 && order_key(&t[order[j]], mode, now) < kv) {
+      order[j + 1] = order[j];
+      j--;
+    }
+    order[j + 1] = key;
+  }
+}
+
+void tc_start(Timer *t, int64_t now) {
+  // resume from the paused remainder, otherwise start a full duration
+  int32_t rem = (t->state == TS_PAUSED) ? t->remaining : t->duration;
+  if (rem < 1) { rem = t->duration; }
+  t->end_time = now + rem;
+  t->state = TS_RUNNING;
+  t->last_used = now;
+}
+
+void tc_pause(Timer *t, int64_t now) {
+  if (t->state == TS_RUNNING) {
+    int64_t r = t->end_time - now;
+    if (r < 0) { r = 0; }
+    t->remaining = (int32_t)r;
+  }
+  t->state = TS_PAUSED;
+  t->last_used = now;
+}
+
+void tc_reset(Timer *t, int64_t now) {
+  t->state = TS_IDLE;
+  t->remaining = t->duration;
+  t->end_time = 0;
+  t->last_used = now;
+}
+
+bool tc_check_expiry(Timer *t, int64_t now) {
+  if (t->state == TS_RUNNING && t->end_time <= now) {
+    t->state = TS_DONE;
+    t->remaining = 0;
+    return true;
+  }
+  return false;
+}
+
+int tc_reconcile(const Timer *cur, int curN, const Timer *cfg, int cfgN, Timer *out) {
+  int n = cfgN > MAX_TIMERS ? MAX_TIMERS : cfgN;
+  for (int i = 0; i < n; i++) {
+    Timer t = cfg[i];   // start from config (IDLE, remaining=duration)
+    if (i < curN && strcmp(cur[i].name, cfg[i].name) == 0 && cur[i].duration == cfg[i].duration) {
+      // unchanged slot: keep all runtime state
+      t = cur[i];
+    } else if (i < curN) {
+      // same position, changed name/duration: keep state but re-derive timing
+      t.state = cur[i].state;
+      t.last_used = cur[i].last_used;
+      if (cur[i].state == TS_RUNNING) {
+        t.end_time = cur[i].end_time;
+      } else if (cur[i].state == TS_PAUSED) {
+        t.remaining = cur[i].remaining > t.duration ? t.duration : cur[i].remaining;
+      } else {
+        t.state = TS_IDLE;
+        t.remaining = t.duration;
+      }
+    }
+    out[i] = t;
+  }
+  return n;
+}
