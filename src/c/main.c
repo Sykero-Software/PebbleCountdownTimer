@@ -269,7 +269,15 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
 
 static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   if (s_count == 0) { return; }
-  open_action_menu(s_order[ci->row]);
+  int idx = s_order[ci->row];
+  // An unstarted (idle) timer has only one useful action — skip the menu, just start.
+  if (s_timers[idx].state == TS_IDLE) {
+    tc_start(&s_timers[idx], now_s());
+    persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+    select_timer_row(idx);
+  } else {
+    open_action_menu(idx);
+  }
 }
 
 // ---- AppMessage inbox: a TimerConfig string + SortOrder int -> reconcile ----
