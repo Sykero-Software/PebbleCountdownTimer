@@ -106,6 +106,13 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
       if (v.length < MAX) { v.push({ name: '', seconds: 0 }); rebuild(v); self.trigger('change'); }
       return;
     }
+    if (target.classList.contains('tl-sort')) {
+      const v = currentValue();
+      v.sort(function(a, b) { return a.seconds - b.seconds; });   // shortest first
+      rebuild(v);
+      self.trigger('change');
+      return;
+    }
     if (target.classList.contains('tl-del')) {
       const rowEl = target.parentNode as HTMLElement;   // button's parent is .tl-row
       const idx = rowIndexOf(rowEl);
@@ -124,6 +131,7 @@ const timerListComponent = {
     '<div class="tl-rootc">' +
     '<div class="tl-list"></div>' +
     '<button type="button" class="tl-add">+ Add timer</button>' +
+    '<button type="button" class="tl-sort">Sort by time</button>' +
     '</div>',
   // Clay base theme forces button{min-width:12rem;margin:0 auto}; row controls must
   // override that and dark-theme the native inputs to match Clay's dark page.
@@ -136,7 +144,8 @@ const timerListComponent = {
     '.tl-name{flex:1 1 auto;min-width:0;box-sizing:border-box;height:2.8rem;margin:0 0 0 6px;' +
       'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.5rem;color-scheme:dark}' +
     '.tl-row button{flex:0 0 auto;min-width:0;width:2.8rem;height:2.8rem;margin:0 0 0 6px;padding:0}' +
-    '.tl-add{margin:8px 0 10px 0}',
+    '.tl-add{margin:8px 0 6px 0}' +
+    '.tl-sort{margin:0 0 10px 0}',
   manipulator: {
     get: function(this: any): any[] {
       return this._tlCurrentValue ? this._tlCurrentValue() : [];
