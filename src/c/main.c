@@ -76,6 +76,7 @@ static ActionMenuLevel *s_action_root;
 
 static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   int idx = (int)(intptr_t)action_menu_get_context(am);
+  if (idx < 0 || idx >= s_count) { return; }
   Timer *t = &s_timers[idx];
   if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
   else { tc_start(t, now_s()); }
@@ -84,6 +85,7 @@ static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
 
 static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   int idx = (int)(intptr_t)action_menu_get_context(am);
+  if (idx < 0 || idx >= s_count) { return; }
   tc_reset(&s_timers[idx], now_s());
   persist_all(); rearm_wakeup(); reload_ui();
 }
