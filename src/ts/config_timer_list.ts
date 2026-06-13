@@ -103,7 +103,7 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
     if (!target) { return; }
     if (target.classList.contains('tl-add')) {
       const v = currentValue();
-      if (v.length < MAX) { v.push({ name: '', seconds: 300 }); rebuild(v); self.trigger('change'); }
+      if (v.length < MAX) { v.push({ name: '', seconds: 0 }); rebuild(v); self.trigger('change'); }
       return;
     }
     if (target.classList.contains('tl-del')) {

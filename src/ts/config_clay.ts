@@ -12,7 +12,7 @@ const config = [
     items: [
       { type: 'heading', defaultValue: 'Timers' },
       { type: 'text', defaultValue: 'Add timers below. On the watch, open a timer to Start/Pause/Reset it.' },
-      { type: 'timerList', messageKey: 'TimerList', defaultValue: [{ name: 'Timer 1', seconds: 300 }] },
+      { type: 'timerList', messageKey: 'TimerList', defaultValue: [{ name: '', seconds: 0 }] },
     ],
   },
   {
