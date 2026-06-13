@@ -44,6 +44,10 @@ void tc_start(Timer *t, int64_t now);
 void tc_pause(Timer *t, int64_t now);
 void tc_reset(Timer *t, int64_t now);
 
+// Run the timer for `secs` more from `now` (e.g. "+1 min" on the alarm), regardless
+// of its current state. Sets RUNNING, end_time = now + secs, stamps last_used.
+void tc_extend(Timer *t, int32_t secs, int64_t now);
+
 // If RUNNING and end_time <= now: mark DONE, remaining 0, return true. Else false.
 bool tc_check_expiry(Timer *t, int64_t now);
 

@@ -126,6 +126,12 @@ void tc_reset(Timer *t, int64_t now) {
   t->last_used = now;
 }
 
+void tc_extend(Timer *t, int32_t secs, int64_t now) {
+  t->state = TS_RUNNING;
+  t->end_time = now + secs;
+  t->last_used = now;
+}
+
 bool tc_check_expiry(Timer *t, int64_t now) {
   if (t->state == TS_RUNNING && t->end_time <= now) {
     t->state = TS_DONE;

@@ -52,6 +52,8 @@ static void reload_ui(void) {
   if (s_menu) { menu_layer_reload_data(s_menu); }
 }
 
+static void ensure_ticking(void);   // defined below; used by the alarm handlers
+
 // Mark every expired RUNNING timer DONE. Returns the count that NEWLY expired and
 // sets s_last_fired_idx to the first of them (drives the alarm screen). No UI here.
 static int sweep_expiries(void) {
@@ -83,16 +85,26 @@ static void alarm_select(ClickRecognizerRef rec, void *ctx) {
   window_stack_remove(s_alarm_window, true);
 }
 
+static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
+  // Snooze: run the finished timer for 1 more minute, then dismiss the alarm.
+  if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
+    tc_extend(&s_timers[s_alarm_idx], 60, now_s());
+    persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+  }
+  window_stack_remove(s_alarm_window, true);
+}
+
 static void alarm_click_config(void *ctx) {
   window_single_click_subscribe(BUTTON_ID_SELECT, alarm_select);
+  window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);
 }
 
 static void alarm_window_load(Window *w) {
   window_set_background_color(w, GColorRed);
   Layer *root = window_get_root_layer(w);
   GRect b = layer_get_bounds(root);
-  const int title_h = 110;
-  s_alarm_title = text_layer_create(GRect(4, (b.size.h - title_h) / 2 - 14, b.size.w - 8, title_h));
+  const int title_h = 78;
+  s_alarm_title = text_layer_create(GRect(4, b.size.h / 2 - 64, b.size.w - 8, title_h));
   text_layer_set_background_color(s_alarm_title, GColorClear);
   text_layer_set_text_color(s_alarm_title, GColorWhite);
   text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
@@ -101,7 +113,7 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text(s_alarm_title, s_alarm_title_buf);
   layer_add_child(root, text_layer_get_layer(s_alarm_title));
 
-  s_alarm_sub = text_layer_create(GRect(4, b.size.h - 50, b.size.w - 8, 46));
+  s_alarm_sub = text_layer_create(GRect(4, b.size.h - 66, b.size.w - 8, 62));
   text_layer_set_background_color(s_alarm_sub, GColorClear);
   text_layer_set_text_color(s_alarm_sub, GColorWhite);
   text_layer_set_font(s_alarm_sub, fonts_get_system_font(FONT_KEY_GOTHIC_18));
@@ -127,9 +139,11 @@ static void trigger_alarm(int idx, int count) {
     tc_format_remaining(s_alarm_title_buf, sizeof(s_alarm_title_buf), t->duration);
   }
   if (count > 1) {
-    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "Time's up  (+%d more)\nSelect: reset", count - 1);
+    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf),
+             "Time's up +%d more\nUp = +1 min\nSelect = reset", count - 1);
   } else {
-    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "Time's up\nSelect: reset");
+    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf),
+             "Time's up\nUp = +1 min\nSelect = reset");
   }
   light_enable_interaction();   // backlight on for the standard brief window
   alarm_vibrate();

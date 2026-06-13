@@ -40,6 +40,11 @@ int main(void) {
   tc_reset(&x, 2500);
   assert(x.state == TS_IDLE && x.remaining == 300 && x.last_used == 2500);
 
+  // --- tc_extend: run for N more secs from now, regardless of prior state ---
+  Timer ex; memset(&ex, 0, sizeof(ex)); ex.duration = 300; ex.state = TS_DONE; ex.remaining = 0;
+  tc_extend(&ex, 60, 5000);
+  assert(ex.state == TS_RUNNING && ex.end_time == 5060 && ex.last_used == 5000);
+
   // --- expiry ---
   Timer y; memset(&y, 0, sizeof(y)); y.duration = 60; y.state = TS_RUNNING; y.end_time = 100;
   assert(tc_check_expiry(&y, 50) == false);
