@@ -225,6 +225,18 @@ the empty-config branch to screenshot without a phone, then revert the seed.
   first-launch race is self-healing (config arrives on next open).
 - **Empty name → time as title.** A timer with no name draws the remaining time as
   the row title and the state as the subtitle (instead of "(unnamed)").
+- **On-watch crashes fixed (hardware-only).** `tc_parse_config` used `strtol`, which
+  the Core Devices firmware doesn't export (links + works on host, faults on-watch) —
+  replaced with a hand-rolled `parse_uint`. And `inbox_received`'s two
+  `Timer[MAX_TIMERS]` locals (~2 KB) overflowed the app stack — made `static`. Also
+  registered outbox sent/failed handlers. (See the watch-app C gotchas in CLAUDE.md.)
+- **Timer-finished alarm screen.** On expiry (foreground tick or wakeup launch) a
+  full-screen red alert shows the finished timer's name in large text (or its time
+  if unnamed), `+N more` when several finished together, a longer multi-buzz
+  vibration, and the backlight on briefly. Select resets that timer from the alarm
+  and dismisses; Back just dismisses. Config reconciles don't alarm.
+- **Single-row config layout.** Each timer is one flex row: H/M/S selectors, then
+  the name (description) last, then the remove (✕).
 - **Duration via dropdowns.** The config page H/M/S are `<select>` dropdowns
   (hours 0–23, minutes/seconds 0–59) instead of number inputs. A pre-existing value
   above 23 h is preserved (kept as an extra option; save clamps only at 99 h, the
