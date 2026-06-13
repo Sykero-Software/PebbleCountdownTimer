@@ -1182,6 +1182,12 @@ static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   persist_all(); rearm_wakeup(); reload_ui();
 }
 
+// Free the level hierarchy after the menu closes (else it leaks per open).
+static void action_menu_did_close(ActionMenu *am, const ActionMenuLevel *root, void *ctx) {
+  action_menu_hierarchy_destroy(root, NULL, NULL);
+  s_action_root = NULL;
+}
+
 static void open_action_menu(int timer_idx) {
   s_action_root = action_menu_level_create(2);
   Timer *t = &s_timers[timer_idx];
@@ -1192,6 +1198,7 @@ static void open_action_menu(int timer_idx) {
     .root_level = s_action_root,
     .context = (void *)(intptr_t)timer_idx,
     .colors = { .background = GColorChromeYellow, .foreground = GColorBlack },
+    .did_close = action_menu_did_close,
     .align = ActionMenuAlignCenter,
   };
   action_menu_open(&cfg);
