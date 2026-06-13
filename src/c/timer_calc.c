@@ -3,12 +3,22 @@
 #include "timer_calc.h"
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 static void copy_name(char *dst, const char *src, size_t srclen) {
   size_t n = srclen < NAME_LEN ? srclen : NAME_LEN;
   memcpy(dst, src, n);
   dst[n] = '\0';
+}
+
+// Parse a non-negative decimal prefix, stopping at the first non-digit (a
+// separator or NUL). Hand-rolled instead of strtol: the Core Devices Pebble
+// firmware does not export strtol, so calling it jumps to an invalid
+// syscall-table slot and hard-faults on-watch (PC in the low syscall region) —
+// even though it links and works on the host. snprintf etc. are fine; strtol is not.
+static int32_t parse_uint(const char *s) {
+  int32_t v = 0;
+  while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
+  return v;
 }
 
 int tc_parse_config(const char *buf, Timer *out, int max) {
@@ -20,7 +30,7 @@ int tc_parse_config(const char *buf, Timer *out, int max) {
     const char *limit = rec_end ? rec_end : (p + strlen(p));
     const char *us = (const char *)memchr(p, '\x1f', (size_t)(limit - p));
     if (us) {
-      int32_t seconds = (int32_t)strtol(us + 1, NULL, 10);
+      int32_t seconds = parse_uint(us + 1);
       if (seconds >= 1) {
         Timer *t = &out[count];
         memset(t, 0, sizeof(*t));

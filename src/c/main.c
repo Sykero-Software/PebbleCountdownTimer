@@ -160,9 +160,12 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
-    Timer parsed[MAX_TIMERS];
+    // static, NOT on the stack: two Timer[MAX_TIMERS] arrays are ~2 KB and would
+    // overflow the Pebble app stack. The inbox handler runs on the single event
+    // loop, so static is safe.
+    static Timer parsed[MAX_TIMERS];
+    static Timer merged[MAX_TIMERS];
     int pn = tc_parse_config(cfg->value->cstring, parsed, MAX_TIMERS);
-    Timer merged[MAX_TIMERS];
     int mn = tc_reconcile(s_timers, s_count, parsed, pn, merged);
     memcpy(s_timers, merged, sizeof(Timer) * (size_t)mn);
     s_count = mn;
@@ -170,6 +173,15 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     persist_all(); rearm_wakeup(); ensure_ticking();
   }
   reload_ui();
+}
+
+// Outbox result handlers. These MUST be registered before sending: on hardware
+// the phone ACKs our outbound Request and the SDK invokes the result callback —
+// if it's NULL the app jumps to a null address and faults (the emulator never
+// hits this because there's no phone to ACK).
+static void outbox_sent(DictionaryIterator *iter, void *ctx) {}
+static void outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *ctx) {
+  APP_LOG(APP_LOG_LEVEL_WARNING, "outbox failed: %d", (int)reason);
 }
 
 // Ask the phone for the current config. A watchapp only receives AppMessages
@@ -220,6 +232,8 @@ static void init(void) {
   rearm_wakeup();
 
   app_message_register_inbox_received(inbox_received);
+  app_message_register_outbox_sent(outbox_sent);
+  app_message_register_outbox_failed(outbox_failed);
   app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
   request_config();   // pull config from the phone (covers app-closed-at-Save case)
 
