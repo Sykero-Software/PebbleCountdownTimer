@@ -8,10 +8,19 @@ static Window *s_window;
 static MenuLayer *s_menu;
 static AppTimer *s_tick;
 
+// Full-screen alarm shown when a timer reaches zero.
+static Window *s_alarm_window;
+static TextLayer *s_alarm_title;
+static TextLayer *s_alarm_sub;
+static int s_alarm_idx = -1;                 // config index the alarm screen is for
+static char s_alarm_title_buf[NAME_LEN + 1]; // big name (or time if unnamed)
+static char s_alarm_sub_buf[48];
+
 static Timer s_timers[MAX_TIMERS];
 static int s_count = 0;
 static int s_order[MAX_TIMERS];   // display order, rebuilt on reload per s_sort
 static SortMode s_sort = SORT_MRU;
+static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
 
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
@@ -43,24 +52,109 @@ static void reload_ui(void) {
   if (s_menu) { menu_layer_reload_data(s_menu); }
 }
 
-// Mark every expired RUNNING timer DONE; vibrate once if any fired. Returns true if any.
-static bool sweep_expiries(bool vibrate) {
-  bool any = false;
+// Mark every expired RUNNING timer DONE. Returns the count that NEWLY expired and
+// sets s_last_fired_idx to the first of them (drives the alarm screen). No UI here.
+static int sweep_expiries(void) {
+  int fired = 0;
   int64_t now = now_s();
   for (int i = 0; i < s_count; i++) {
-    if (tc_check_expiry(&s_timers[i], now)) { any = true; }
+    if (tc_check_expiry(&s_timers[i], now)) {
+      if (fired == 0) { s_last_fired_idx = i; }
+      fired++;
+    }
   }
-  if (any && vibrate) { vibes_long_pulse(); }
-  return any;
+  return fired;
+}
+
+// ---- full-screen alarm when a timer finishes ----
+static void alarm_vibrate(void) {
+  // a bit longer than a single long pulse: several long buzzes
+  static const uint32_t segs[] = {500, 200, 500, 200, 500, 200, 700};
+  VibePattern pat = { .durations = segs, .num_segments = ARRAY_LENGTH(segs) };
+  vibes_enqueue_custom_pattern(pat);
+}
+
+static void alarm_select(ClickRecognizerRef rec, void *ctx) {
+  // Reset the finished timer directly from the alarm, then dismiss.
+  if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
+    tc_reset(&s_timers[s_alarm_idx], now_s());
+    persist_all(); rearm_wakeup(); reload_ui();
+  }
+  window_stack_remove(s_alarm_window, true);
+}
+
+static void alarm_click_config(void *ctx) {
+  window_single_click_subscribe(BUTTON_ID_SELECT, alarm_select);
+}
+
+static void alarm_window_load(Window *w) {
+  window_set_background_color(w, GColorRed);
+  Layer *root = window_get_root_layer(w);
+  GRect b = layer_get_bounds(root);
+  const int title_h = 110;
+  s_alarm_title = text_layer_create(GRect(4, (b.size.h - title_h) / 2 - 14, b.size.w - 8, title_h));
+  text_layer_set_background_color(s_alarm_title, GColorClear);
+  text_layer_set_text_color(s_alarm_title, GColorWhite);
+  text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_alarm_title, GTextAlignmentCenter);
+  text_layer_set_overflow_mode(s_alarm_title, GTextOverflowModeWordWrap);
+  text_layer_set_text(s_alarm_title, s_alarm_title_buf);
+  layer_add_child(root, text_layer_get_layer(s_alarm_title));
+
+  s_alarm_sub = text_layer_create(GRect(4, b.size.h - 50, b.size.w - 8, 46));
+  text_layer_set_background_color(s_alarm_sub, GColorClear);
+  text_layer_set_text_color(s_alarm_sub, GColorWhite);
+  text_layer_set_font(s_alarm_sub, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_text_alignment(s_alarm_sub, GTextAlignmentCenter);
+  text_layer_set_text(s_alarm_sub, s_alarm_sub_buf);
+  layer_add_child(root, text_layer_get_layer(s_alarm_sub));
+}
+
+static void alarm_window_unload(Window *w) {
+  text_layer_destroy(s_alarm_title); s_alarm_title = NULL;
+  text_layer_destroy(s_alarm_sub); s_alarm_sub = NULL;
+}
+
+// Show the alarm for timer `idx` (first of `count` that just finished): big name,
+// long vibration, backlight on briefly; Select resets it.
+static void trigger_alarm(int idx, int count) {
+  if (idx < 0 || idx >= s_count) { return; }
+  s_alarm_idx = idx;
+  Timer *t = &s_timers[idx];
+  if (t->name[0]) {
+    snprintf(s_alarm_title_buf, sizeof(s_alarm_title_buf), "%s", t->name);
+  } else {
+    tc_format_remaining(s_alarm_title_buf, sizeof(s_alarm_title_buf), t->duration);
+  }
+  if (count > 1) {
+    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "Time's up  (+%d more)\nSelect: reset", count - 1);
+  } else {
+    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "Time's up\nSelect: reset");
+  }
+  light_enable_interaction();   // backlight on for the standard brief window
+  alarm_vibrate();
+  if (!s_alarm_window) {
+    s_alarm_window = window_create();
+    window_set_window_handlers(s_alarm_window, (WindowHandlers){
+      .load = alarm_window_load, .unload = alarm_window_unload });
+    window_set_click_config_provider(s_alarm_window, alarm_click_config);
+  }
+  if (window_stack_get_top_window() == s_alarm_window) {
+    // already showing (another timer finished): refresh the text in place
+    if (s_alarm_title) { text_layer_set_text(s_alarm_title, s_alarm_title_buf); }
+    if (s_alarm_sub) { text_layer_set_text(s_alarm_sub, s_alarm_sub_buf); }
+  } else {
+    window_stack_push(s_alarm_window, true);
+  }
 }
 
 // ---- 1s foreground tick: refresh running rows + catch foreground expiries ----
 static void tick_cb(void *ctx) {
-  bool fired = sweep_expiries(true);
+  int fired = sweep_expiries();
   bool running = false;
   for (int i = 0; i < s_count; i++) { if (s_timers[i].state == TS_RUNNING) { running = true; } }
   reload_ui();
-  if (fired) { persist_all(); rearm_wakeup(); }
+  if (fired) { persist_all(); rearm_wakeup(); trigger_alarm(s_last_fired_idx, fired); }
   s_tick = running ? app_timer_register(1000, tick_cb, NULL) : NULL;
 }
 
@@ -169,7 +263,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     int mn = tc_reconcile(s_timers, s_count, parsed, pn, merged);
     memcpy(s_timers, merged, sizeof(Timer) * (size_t)mn);
     s_count = mn;
-    sweep_expiries(false);
+    sweep_expiries();   // mark stale expiries DONE; no alarm for a config reconcile
     persist_all(); rearm_wakeup(); ensure_ticking();
   }
   reload_ui();
@@ -227,7 +321,7 @@ static void init(void) {
   WakeupId wid; int32_t cookie;
   bool by_wakeup = wakeup_get_launch_event(&wid, &cookie);
   if (by_wakeup) { store_save_wakeup_id(-1); }
-  bool fired = sweep_expiries(by_wakeup);   // vibrate only on wakeup launch
+  int fired = sweep_expiries();
   if (fired) { persist_all(); }
   rearm_wakeup();
 
@@ -242,6 +336,9 @@ static void init(void) {
   window_stack_push(s_window, true);
   rebuild_order();
   ensure_ticking();
+
+  // Launched by a wakeup because a timer finished -> show the alarm over the list.
+  if (by_wakeup && fired) { trigger_alarm(s_last_fired_idx, fired); }
 }
 
 static void deinit(void) {
