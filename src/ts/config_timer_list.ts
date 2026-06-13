@@ -38,14 +38,14 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
     // textarea-safe: escape the name into the value attribute
     const safe = ('' + name).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
       .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Single row: time selectors first, name (description) last, then remove.
     return '<div class="tl-row">' +
-      '<input class="tl-name" type="text" placeholder="Name" value="' + safe + '">' +
-      '<div class="tl-dur">' +
       '<select class="tl-h">' + selOptions(23, h) + '</select><span>h</span>' +
       '<select class="tl-m">' + selOptions(59, m) + '</select><span>m</span>' +
       '<select class="tl-s">' + selOptions(59, s) + '</select><span>s</span>' +
+      '<input class="tl-name" type="text" placeholder="Name" value="' + safe + '">' +
       '<button type="button" class="tl-del" title="Remove">&#10005;</button>' +
-      '</div></div>';
+      '</div>';
   }
 
   function currentValue(): any[] {
@@ -107,7 +107,7 @@ function timerListInitialize(this: any, _minified: any, _clayConfig: any): void 
       return;
     }
     if (target.classList.contains('tl-del')) {
-      const rowEl = target.parentNode ? (target.parentNode as HTMLElement).parentNode as HTMLElement : null;
+      const rowEl = target.parentNode as HTMLElement;   // button's parent is .tl-row
       const idx = rowIndexOf(rowEl);
       if (idx === -1) { return; }
       const v = currentValue();
@@ -127,15 +127,15 @@ const timerListComponent = {
     '</div>',
   // Clay base theme forces button{min-width:12rem;margin:0 auto}; row controls must
   // override that and dark-theme the native inputs to match Clay's dark page.
+  // One flex row per timer: H/M/S selectors, then the name, then the remove (x).
   style:
-    '.tl-row{margin:0 0 12px 0}' +
-    '.tl-name{display:block;width:100%;box-sizing:border-box;height:2.8rem;margin:0 0 4px 0;' +
+    '.tl-row{display:flex;align-items:center;margin:0 0 10px 0}' +
+    '.tl-row select{flex:0 0 auto;min-width:0;width:2.9rem;height:2.8rem;margin:0;' +
+      'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.15rem;color-scheme:dark}' +
+    '.tl-row span{flex:0 0 auto;margin:0 5px 0 2px;color:#fff}' +
+    '.tl-name{flex:1 1 auto;min-width:0;box-sizing:border-box;height:2.8rem;margin:0 0 0 6px;' +
       'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.5rem;color-scheme:dark}' +
-    '.tl-dur{display:flex;align-items:center}' +
-    '.tl-dur select{flex:1 1 auto;min-width:0;width:3rem;height:2.8rem;margin:0 2px 0 0;' +
-      'background-color:#767676;color:#fff;border:none;border-radius:0.3rem;padding:0 0.3rem;color-scheme:dark}' +
-    '.tl-dur span{flex:0 0 auto;margin:0 6px 0 0;color:#fff}' +
-    '.tl-dur button{flex:0 0 auto;min-width:0;width:2.8rem;height:2.8rem;margin:0 0 0 6px;padding:0}' +
+    '.tl-row button{flex:0 0 auto;min-width:0;width:2.8rem;height:2.8rem;margin:0 0 0 6px;padding:0}' +
     '.tl-add{margin:8px 0 10px 0}',
   manipulator: {
     get: function(this: any): any[] {
