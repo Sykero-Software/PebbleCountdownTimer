@@ -211,3 +211,21 @@ the empty-config branch to screenshot without a phone, then revert the seed.
   versioned (a schema byte) so future changes don't misread old data.
 - Vibration pattern for Done (single long vs repeated) — pick a default, no setting.
 - Wakeup 1-minute-window nudging is a rare edge; log when it triggers.
+
+## Post-implementation revisions (2026-06-13)
+
+- **Config delivery handshake (bug fix).** A watchapp only receives AppMessages
+  while running, so config saved on the phone while the app was closed was dropped
+  ("No timers"). Added a watch-driven handshake: the watch sends `{Request:1}` (new
+  `Request` messageKey) on launch; the phone persists the last-saved config to PKJS
+  localStorage (`timer_config`/`sort_order`) in `webviewclosed` and re-sends it from
+  an `appmessage` listener (`resendDict` in `src/ts/config_sync.ts`). `resendDict`
+  returns null when nothing was ever saved (don't clobber the watch) but sends `""`
+  for an explicitly-cleared list. One-way (Request → reply), so it can't loop;
+  first-launch race is self-healing (config arrives on next open).
+- **Empty name → time as title.** A timer with no name draws the remaining time as
+  the row title and the state as the subtitle (instead of "(unnamed)").
+- **Duration via dropdowns.** The config page H/M/S are `<select>` dropdowns
+  (hours 0–23, minutes/seconds 0–59) instead of number inputs. A pre-existing value
+  above 23 h is preserved (kept as an extra option; save clamps only at 99 h, the
+  historical max) so it is never silently truncated.
