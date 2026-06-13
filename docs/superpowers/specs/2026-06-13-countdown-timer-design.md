@@ -30,8 +30,8 @@ app is not in the foreground.
   - `targetPlatforms`: `aplite, basalt, chalk, diorite, emery, flint, gabbro` (same
     set as PebbleTrackWorkTime).
   - `enableMultiJS: true`, dependency `pebble-clay@^1.0.4`.
-  - `messageKeys`: a single `TimerConfig` string key (see Data flow). Append-only if
-    more are ever added.
+  - `messageKeys`: `TimerConfig` (CString, the timer list) + `SortOrder` (int, the
+    watch list sort mode). Append-only if more are ever added.
 - `wscript`: copy PebbleTrackWorkTime's `wscript` but:
   - **keep** `patch_clay_for_new_platforms` (flint/gabbro need `.a` stubs — Clay
     1.0.4 ships its C lib only for aplite/basalt/chalk/diorite/emery).
@@ -49,8 +49,17 @@ list order is irrelevant since the watch sorts by most-recently-used:
 
 - Each row: **name** text input + **duration** as three small number fields
   (HH / MM / SS) + a **✕** (remove) control. No ↑/↓.
-- An **"Add timer"** button; **max 8** rows (hide Add at 8).
+- An **"Add timer"** button; **max 16** rows (hide Add at 16).
 - Value = ordered array of `{ name: string, seconds: number }`.
+
+Plus a **sort-order** `radiogroup` (`SortOrder`, a real watch key) controlling how
+the watch orders the list (Clay radiogroup values MUST be strings — see the
+TimeStyle Clay gotchas — parsed to int on save):
+- `0` — **Most recently used** (default): last acted-on timer first.
+- `1` — **Shortest remaining first**: by current remaining time ascending.
+- `2` — **Longest remaining first**: by current remaining time descending.
+Time-based modes (1/2) re-sort live as timers count down (recomputed on each
+list reload).
 - Clay-`toSource()` rules (same as TimeStyle's custom component & custom fn): the
   component and any custom fn are serialized via `toSource()` and re-eval'd isolated
   in the config webview — **no TS downlevel helpers** (`__spreadArray`/`__assign`/
@@ -77,6 +86,9 @@ list order is irrelevant since the watch sorts by most-recently-used:
     (US): `name \x1f seconds \x1e name \x1f seconds ...`. Names may not contain
     `\x1e`/`\x1f` (strip on the JS side). The watch parser must match exactly.
   - names are truncated to `NAME_LEN` on the watch; seconds is a decimal integer.
+  - at most **16** records (`MAX_TIMERS`); extras dropped.
+- `SortOrder` is sent as a separate int key (0/1/2); the watch persists it and
+  applies it to the list ordering.
 - The watch parses the string into its in-memory `Timer[]` config on inbox receive,
   persists it, and reconciles runtime state (below).
 - Only Clay JS references message keys (by name), so the positional
@@ -86,13 +98,13 @@ list order is irrelevant since the watch sorts by most-recently-used:
 ## Watch app UI
 
 - `Window` + `MenuLayer`, one section, one row per configured timer.
-- **Row order = most-recently-used first.** Rows are sorted by each timer's
-  `last_used` timestamp (descending); never-used timers fall to the bottom in
-  config order (ties broken by config position). The list is a *view* over the
-  config — the underlying timer identity is still its config position; only the
-  displayed order changes. The order is recomputed when the list rebuilds (on
-  open, after an action, on config/state change) — it does not reshuffle live
-  under the user's cursor mid-interaction beyond a normal `menu_layer_reload_data`.
+- **Row order follows the `SortOrder` setting** (default most-recently-used):
+  MRU = `last_used` descending; shortest/longest = current remaining time
+  ascending/descending. Ties broken by config position. The list is a *view* over
+  the config — the underlying timer identity is still its config position; only the
+  displayed order changes. The order is recomputed when the list rebuilds (on open,
+  after an action, on config/state change, and on each 1 s tick so time-based modes
+  track the countdown).
 - Row content: timer **name** (top line) + **remaining time** formatted `MM:SS`
   (or `H:MM:SS` when ≥ 1 h) + a small **state** indicator: Running / Paused / Done /
   Idle.
@@ -129,8 +141,12 @@ of the watch list):
   Stays DONE at 00:00 until the user resets.
 
 Persistence:
-- On every state change and on app exit (`window_unload`/`deinit`), write the array
-  to persist storage (a packed struct or per-field keys; small, ≤ 8 entries).
+- On every state change and on app exit (`window_unload`/`deinit`), write each
+  timer to **its own persist key** (`PERSIST_KEY_TIMER_BASE + i`) plus a count key,
+  a schema byte, the `SortOrder`, and the wakeup id. **One packed blob will NOT
+  fit:** `persist_write_data` caps at **256 bytes/key**, and a `Timer` is ~64 B, so
+  16 of them (~1 KB) must be split across keys (the 4 KB/256-key per-app budget has
+  ample room).
 - On launch, load persisted state, then **reconcile** against the (also persisted)
   config and against `now` (see below).
 
@@ -173,15 +189,16 @@ Factor pure logic so it can be unit-tested off-device:
 **Clay / TS (Jest, like TimeStyle `tests/`):**
 - `configToString` / `stringToConfig` round-trip (the AppMessage serialization).
 - `listToConfig` / `configToList` for the custom component (trailing-empty trim,
-  max-8 cap, name/seconds coercion).
+  max-16 cap, name/seconds coercion).
 - duration ↔ HH/MM/SS field conversion.
 
 **Watch C (pure helpers, no UI deps):**
 - `format_remaining(seconds) → "MM:SS" | "H:MM:SS"`.
 - `parse_config_string(buf) → Timer[]`.
 - `soonest_end_time(Timer[]) → time_t | NONE` (next-wakeup selection).
-- `display_order(Timer[]) → int[]` (indices sorted by `last_used` desc, never-used
-  last in config order — drives the MRU list ordering).
+- `display_order(Timer[], sort_mode, now) → int[]` (indices sorted per SortOrder:
+  MRU by `last_used` desc, or shortest/longest by remaining-at-`now` asc/desc;
+  ties by config index — drives the list ordering).
 - `reconcile(config, persisted_state, now) → Timer[]` (expiry + config diff).
 
 Device verification: emery emulator screenshots of the list (Running/Paused/Done/
