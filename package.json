@@ -1,0 +1,30 @@
+{
+  "name": "countdown-timer",
+  "author": "Sykerö Software",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "Countdown timer",
+    "uuid": "6514c531-5e09-470e-8ffb-ce633f721e64",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["aplite", "basalt", "chalk", "diorite", "emery", "flint", "gabbro"],
+    "capabilities": [],
+    "watchapp": { "watchface": false },
+    "messageKeys": ["TimerConfig", "SortOrder"],
+    "resources": { "media": [] }
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "pretest": "tsc",
+    "test": "node --test tests/*.test.js"
+  }
+}
