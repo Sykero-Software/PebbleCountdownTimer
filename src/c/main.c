@@ -12,6 +12,8 @@ static AppTimer *s_tick;
 static Window *s_alarm_window;
 static TextLayer *s_alarm_title;
 static TextLayer *s_alarm_sub;
+static TextLayer *s_alarm_lbl_up;    // "+1 Min" next to the UP button
+static TextLayer *s_alarm_lbl_down;  // "Stop"  next to the DOWN button
 static int s_alarm_idx = -1;                 // config index the alarm screen is for
 static char s_alarm_title_buf[NAME_LEN + 1]; // big name (or time if unnamed)
 static char s_alarm_sub_buf[48];
@@ -133,8 +135,28 @@ static void alarm_window_load(Window *w) {
   window_set_background_color(w, GColorRed);
   Layer *root = window_get_root_layer(w);
   GRect b = layer_get_bounds(root);
-  const int title_h = 78;
-  s_alarm_title = text_layer_create(GRect(4, b.size.h / 2 - 64, b.size.w - 8, title_h));
+  const int h = b.size.h, wd = b.size.w;
+
+  // "+N more" — small, top-centre (free space; the UP label is right-aligned).
+  s_alarm_sub = text_layer_create(GRect(4, 2, wd - 8, 22));
+  text_layer_set_background_color(s_alarm_sub, GColorClear);
+  text_layer_set_text_color(s_alarm_sub, GColorWhite);
+  text_layer_set_font(s_alarm_sub, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_text_alignment(s_alarm_sub, GTextAlignmentCenter);
+  text_layer_set_text(s_alarm_sub, s_alarm_sub_buf);
+  layer_add_child(root, text_layer_get_layer(s_alarm_sub));
+
+  // "+1 Min" — big bold, right-aligned, vertically by the UP button (~22% h).
+  s_alarm_lbl_up = text_layer_create(GRect(0, h * 22 / 100 - 16, wd - 6, 34));
+  text_layer_set_background_color(s_alarm_lbl_up, GColorClear);
+  text_layer_set_text_color(s_alarm_lbl_up, GColorWhite);
+  text_layer_set_font(s_alarm_lbl_up, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_alarm_lbl_up, GTextAlignmentRight);
+  text_layer_set_text(s_alarm_lbl_up, "+1 Min");
+  layer_add_child(root, text_layer_get_layer(s_alarm_lbl_up));
+
+  // Title — big bold, centred middle band (timer name, or time if unnamed).
+  s_alarm_title = text_layer_create(GRect(4, h / 2 - 32, wd - 8, 64));
   text_layer_set_background_color(s_alarm_title, GColorClear);
   text_layer_set_text_color(s_alarm_title, GColorWhite);
   text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
@@ -143,19 +165,22 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text(s_alarm_title, s_alarm_title_buf);
   layer_add_child(root, text_layer_get_layer(s_alarm_title));
 
-  s_alarm_sub = text_layer_create(GRect(4, b.size.h - 66, b.size.w - 8, 62));
-  text_layer_set_background_color(s_alarm_sub, GColorClear);
-  text_layer_set_text_color(s_alarm_sub, GColorWhite);
-  text_layer_set_font(s_alarm_sub, fonts_get_system_font(FONT_KEY_GOTHIC_18));
-  text_layer_set_text_alignment(s_alarm_sub, GTextAlignmentCenter);
-  text_layer_set_text(s_alarm_sub, s_alarm_sub_buf);
-  layer_add_child(root, text_layer_get_layer(s_alarm_sub));
+  // "Stop" — big bold, right-aligned, vertically by the DOWN button (~78% h).
+  s_alarm_lbl_down = text_layer_create(GRect(0, h * 78 / 100 - 18, wd - 6, 34));
+  text_layer_set_background_color(s_alarm_lbl_down, GColorClear);
+  text_layer_set_text_color(s_alarm_lbl_down, GColorWhite);
+  text_layer_set_font(s_alarm_lbl_down, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_alarm_lbl_down, GTextAlignmentRight);
+  text_layer_set_text(s_alarm_lbl_down, "Stop");
+  layer_add_child(root, text_layer_get_layer(s_alarm_lbl_down));
 }
 
 static void alarm_window_unload(Window *w) {
   alarm_buzz_stop();
   text_layer_destroy(s_alarm_title); s_alarm_title = NULL;
   text_layer_destroy(s_alarm_sub); s_alarm_sub = NULL;
+  text_layer_destroy(s_alarm_lbl_up); s_alarm_lbl_up = NULL;
+  text_layer_destroy(s_alarm_lbl_down); s_alarm_lbl_down = NULL;
 }
 
 // Show the alarm for timer `idx` (first of `count` that just finished): big name,
@@ -170,11 +195,9 @@ static void trigger_alarm(int idx, int count) {
     tc_format_remaining(s_alarm_title_buf, sizeof(s_alarm_title_buf), t->duration);
   }
   if (count > 1) {
-    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf),
-             "Time's up +%d more\nUp = +1 min\nSelect = reset", count - 1);
+    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "+%d more", count - 1);
   } else {
-    snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf),
-             "Time's up\nUp = +1 min\nSelect = reset");
+    s_alarm_sub_buf[0] = '\0';
   }
   light_enable_interaction();   // backlight on for the standard brief window
   alarm_buzz_start();   // repeating buzz until dismissed (cap restarts on each trigger)
