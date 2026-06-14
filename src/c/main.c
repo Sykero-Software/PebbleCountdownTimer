@@ -124,8 +124,9 @@ static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
 }
 
 static void alarm_click_config(void *ctx) {
-  window_single_click_subscribe(BUTTON_ID_SELECT, alarm_select);
-  window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);
+  window_single_click_subscribe(BUTTON_ID_DOWN, alarm_select);      // Stop: reset + dismiss
+  window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);    // +1 Min: snooze + dismiss
+  window_single_click_subscribe(BUTTON_ID_BACK, alarm_add_minute);  // Back = snooze (matches stock)
 }
 
 static void alarm_window_load(Window *w) {
