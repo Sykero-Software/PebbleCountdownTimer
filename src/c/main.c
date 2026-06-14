@@ -155,11 +155,11 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text(s_alarm_lbl_up, "+1 Min");
   layer_add_child(root, text_layer_get_layer(s_alarm_lbl_up));
 
-  // Title — big bold, centred middle band (timer name, or time if unnamed).
-  s_alarm_title = text_layer_create(GRect(4, h / 2 - 32, wd - 8, 64));
+  // Title — large bold, centred middle band (timer name, or time if unnamed).
+  s_alarm_title = text_layer_create(GRect(2, h / 2 - 36, wd - 4, 72));
   text_layer_set_background_color(s_alarm_title, GColorClear);
   text_layer_set_text_color(s_alarm_title, GColorWhite);
-  text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
   text_layer_set_text_alignment(s_alarm_title, GTextAlignmentCenter);
   text_layer_set_overflow_mode(s_alarm_title, GTextOverflowModeWordWrap);
   text_layer_set_text(s_alarm_title, s_alarm_title_buf);
