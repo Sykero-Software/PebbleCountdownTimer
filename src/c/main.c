@@ -16,6 +16,14 @@ static int s_alarm_idx = -1;                 // config index the alarm screen is
 static char s_alarm_title_buf[NAME_LEN + 1]; // big name (or time if unnamed)
 static char s_alarm_sub_buf[48];
 
+// Repeating "alarm clock" buzz: re-fire alarm_vibrate() on a timer until the
+// user dismisses, capped at ALARM_BUZZ_MAX_S so an unattended watch stops
+// buzzing (stock Pebble alarm caps at 10 min; see PebbleOS alarm_popup.c).
+#define ALARM_BUZZ_INTERVAL_MS 4000   // ~pattern length (2.8s) + a short gap
+#define ALARM_BUZZ_MAX_S       600    // 10 min, then stop buzzing (screen stays)
+static AppTimer *s_alarm_buzz_timer;
+static int64_t   s_alarm_buzz_start_s;
+
 static Timer s_timers[MAX_TIMERS];
 static int s_count = 0;
 static int s_order[MAX_TIMERS];   // display order, rebuilt on reload per s_sort
@@ -76,6 +84,27 @@ static void alarm_vibrate(void) {
   vibes_enqueue_custom_pattern(pat);
 }
 
+// Re-buzz on a repeating timer until the 10-min cap; then stop scheduling but
+// leave the alarm window up (the user must press Stop/+1 Min to dismiss).
+static void alarm_buzz_cb(void *ctx) {
+  s_alarm_buzz_timer = NULL;
+  if (now_s() - s_alarm_buzz_start_s >= ALARM_BUZZ_MAX_S) { return; }
+  alarm_vibrate();
+  s_alarm_buzz_timer = app_timer_register(ALARM_BUZZ_INTERVAL_MS, alarm_buzz_cb, NULL);
+}
+
+static void alarm_buzz_start(void) {
+  if (s_alarm_buzz_timer) { app_timer_cancel(s_alarm_buzz_timer); s_alarm_buzz_timer = NULL; }
+  s_alarm_buzz_start_s = now_s();
+  alarm_vibrate();   // buzz now
+  s_alarm_buzz_timer = app_timer_register(ALARM_BUZZ_INTERVAL_MS, alarm_buzz_cb, NULL);
+}
+
+static void alarm_buzz_stop(void) {
+  if (s_alarm_buzz_timer) { app_timer_cancel(s_alarm_buzz_timer); s_alarm_buzz_timer = NULL; }
+  vibes_cancel();
+}
+
 static void alarm_select(ClickRecognizerRef rec, void *ctx) {
   // Reset the finished timer directly from the alarm, then dismiss.
   if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
@@ -123,6 +152,7 @@ static void alarm_window_load(Window *w) {
 }
 
 static void alarm_window_unload(Window *w) {
+  alarm_buzz_stop();
   text_layer_destroy(s_alarm_title); s_alarm_title = NULL;
   text_layer_destroy(s_alarm_sub); s_alarm_sub = NULL;
 }
@@ -146,7 +176,7 @@ static void trigger_alarm(int idx, int count) {
              "Time's up\nUp = +1 min\nSelect = reset");
   }
   light_enable_interaction();   // backlight on for the standard brief window
-  alarm_vibrate();
+  alarm_buzz_start();   // repeating buzz until dismissed (cap restarts on each trigger)
   if (!s_alarm_window) {
     s_alarm_window = window_create();
     window_set_window_handlers(s_alarm_window, (WindowHandlers){
