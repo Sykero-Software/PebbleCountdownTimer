@@ -65,14 +65,17 @@ MenuLayer header via `.get_header_height` (returns a compact height, ~26 px) and
 
 ### Rows (state-dependent)
 
-| State    | Rows                                              |
-|----------|---------------------------------------------------|
-| RUNNING  | `Pause` `Reset` `+1 min` `+5 min` `+10 min`        |
-| PAUSED   | `Start` `Reset` `+1 min` `+5 min` `+10 min`        |
-| DONE     | `Start` `Reset`                                    |
+| State    | Rows                                    |
+|----------|-----------------------------------------|
+| RUNNING  | `Pause` `Reset` `+1 min` `-1 min`        |
+| PAUSED   | `Start` `Reset` `+1 min` `-1 min`        |
+| DONE     | `Start` `Reset`                          |
 
-Row 0 label is `Pause` when RUNNING else `Start`. `+N` rows only exist when
-RUNNING or PAUSED (`addable`). `get_num_rows` returns `addable ? 5 : 2`.
+Row 0 label is `Pause` when RUNNING else `Start`. The `+1 min` / `-1 min` rows only
+exist when RUNNING or PAUSED (`addable`). `get_num_rows` returns `addable ? 4 : 2`.
+`-1 min` subtracts a minute (`tc_add(..., -60, ...)`); floored at 0 by `tc_add`
+for a paused timer, and for a running timer with under a minute left it reaches the
+end and the alarm fires on the next sweep — the user confirmed this behavior.
 
 ### Colors + compactness
 
@@ -81,8 +84,8 @@ RUNNING or PAUSED (`addable`). `get_num_rows` returns `addable ? 5 : 2`.
 - `menu_layer_set_highlight_colors(s_detail_menu, GColorBlack, GColorWhite)` —
   selected row inverted (high contrast, no color dependency so it also looks right
   on b&w diorite).
-- Cell height ~28 px (`.get_cell_height`) so header + 5 rows fit: emery (228 px)
-  comfortably; diorite (168 px) tight but acceptable (26 px header + 5×28 = 166).
+- Cell height ~28 px (`.get_cell_height`) so header + 4 rows fit comfortably on both
+  emery (228 px) and diorite (26 px header + 4×28 = 138).
 
 ### Select handler (`detail_select`)
 
@@ -98,13 +101,13 @@ state's row set:
   then `window_stack_remove(s_detail_window, true)` to pop back to the list (the
   timer is now IDLE; the detail window has no IDLE row set). The list cursor follows
   via `select_timer_row(idx)` before popping.
-- **`+1/+5/+10 min` (rows 2-4, only when addable):** `tc_add(..., 60/300/600, ...)`;
-  `persist_all(); rearm_wakeup(); ensure_ticking();` `reload_ui()` +
-  `menu_layer_reload_data(s_detail_menu)` (header time jumps). Window stays open so
-  repeated `+N` presses work.
+- **`+1 min` / `-1 min` (rows 2-3, only when addable):** `tc_add(..., 60, ...)` /
+  `tc_add(..., -60, ...)`; `persist_all(); rearm_wakeup(); ensure_ticking();`
+  `reload_ui()` + `menu_layer_reload_data(s_detail_menu)` (header time jumps). Window
+  stays open so repeated presses work.
 
-Row→seconds for the `+N` rows is a small switch (rows 2/3/4 → 60/300/600); no
-action_data plumbing (that was an ActionMenu concept).
+Row→seconds is a small switch (row 2 → +60, row 3 → -60); no action_data plumbing
+(that was an ActionMenu concept).
 
 ### Live ticking while the window is open
 
@@ -154,10 +157,10 @@ the file's established style (it already holds the list window + alarm window).
   (200 px, the user's real watch) and diorite (144 px) to confirm fit + colors.
   Surface screenshots to the user.
 - Real Pebble Time 2: open a running timer → header shows live ticking time, rows
-  `Pause/Reset/+1/+5/+10`, white bg/black text; press `+5 min` thrice → time grows
-  by 15:00 and the window stays open; Pause → row 0 becomes `Start`, time freezes;
-  Reset → back to the list; Back → back to the list; starting an idle timer with
-  AutoReturn on still exits to the watchface.
+  `Pause/Reset/+1 min/-1 min`, white bg/black text; press `+1 min` a few times → time
+  grows and the window stays open; press `-1 min` → time drops by a minute; Pause →
+  row 0 becomes `Start`, time freezes; Reset → back to the list; Back → back to the
+  list; starting an idle timer with AutoReturn on still exits to the watchface.
 
 ## Out of scope
 
