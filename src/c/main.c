@@ -33,6 +33,11 @@ static SortMode s_sort = SORT_MRU;
 static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
 static bool s_auto_return = false; // config: pop to watchface after a start/resume
 
+// ---- per-timer detail window: live-time header + Pause/Reset/+N actions ----
+static Window *s_detail_window;
+static MenuLayer *s_detail_menu;
+static int s_detail_idx = -1;   // config index the detail window is showing
+
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
 // ---- wakeup: keep exactly ONE armed for the soonest running end_time ----
@@ -223,6 +228,9 @@ static void tick_cb(void *ctx) {
   bool running = false;
   for (int i = 0; i < s_count; i++) { if (s_timers[i].state == TS_RUNNING) { running = true; } }
   reload_ui();
+  if (s_detail_menu && window_stack_get_top_window() == s_detail_window) {
+    menu_layer_reload_data(s_detail_menu);   // retick the live time header
+  }
   if (fired) { persist_all(); rearm_wakeup(); trigger_alarm(s_last_fired_idx, fired); }
   s_tick = running ? app_timer_register(1000, tick_cb, NULL) : NULL;
 }
@@ -234,11 +242,10 @@ static void ensure_ticking(void) {
   }
 }
 
-// ---- ActionMenu: Start/Pause + Reset for the selected timer ----
-static ActionMenuLevel *s_action_root;
+// ---- per-timer detail window: live-time header + Pause/Reset/+N actions ----
 
-// After acting on a timer it re-sorts (e.g. floats to the top in MRU mode); move
-// the menu cursor to follow it to its new row so the user needn't scroll to it.
+// After acting on a timer it re-sorts (e.g. floats to the top in MRU mode); move the
+// LIST cursor to follow it to its new row so the user needn't scroll to it.
 static void select_timer_row(int idx) {
   if (!s_menu) { return; }
   for (int row = 0; row < s_count; row++) {
@@ -250,69 +257,119 @@ static void select_timer_row(int idx) {
   }
 }
 
-// Config option: leave the app (-> watchface) after a timer is started/resumed.
-// The wakeup keeps a closed app's timer firing, so the alarm still triggers.
-// Calling window_stack_pop_all from inside an ActionMenu callback is safe: the
-// SDK fires did_close during the unwind, which frees the level hierarchy.
+// Config option: leave the app (-> watchface) after a timer is started. The wakeup
+// keeps a closed app's timer firing, so the alarm still triggers. ONLY used by the
+// idle one-tap start in ml_select; the detail window never auto-returns (the user may
+// press +1 min several times).
 static void return_to_watchface(void) {
   if (s_auto_return) { window_stack_pop_all(true); }
 }
 
-static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
-  int idx = (int)(intptr_t)action_menu_get_context(am);
+// true when the detail window's timer can take +N (it is running or paused).
+static bool detail_addable(void) {
+  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return false; }
+  TimerState st = s_timers[s_detail_idx].state;
+  return st == TS_RUNNING || st == TS_PAUSED;
+}
+
+static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
+  return detail_addable() ? 5 : 2;   // Pause/Start, Reset [, +1, +5, +10]
+}
+static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
+static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
+
+// Header: timer name (left) + live remaining time (right); time only if unnamed.
+static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, void *ctx) {
+  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return; }
+  Timer *t = &s_timers[s_detail_idx];
+  char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
+  GRect b = layer_get_bounds(cell);
+  GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  graphics_context_set_text_color(gctx, GColorBlack);
+  if (t->name[0]) {
+    graphics_draw_text(gctx, t->name, f, GRect(4, 2, b.size.w - 60, 22),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(gctx, rem, f, GRect(4, 2, b.size.w - 8, 22),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  } else {
+    graphics_draw_text(gctx, rem, f, GRect(4, 2, b.size.w - 8, 22),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+}
+
+static const char *dl_row_label(int row, bool running) {
+  switch (row) {
+    case 0: return running ? "Pause" : "Start";
+    case 1: return "Reset";
+    case 2: return "+1 min";
+    case 3: return "+5 min";
+    case 4: return "+10 min";
+    default: return "";
+  }
+}
+
+static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
+  bool running = (s_detail_idx >= 0 && s_detail_idx < s_count
+                  && s_timers[s_detail_idx].state == TS_RUNNING);
+  GRect b = layer_get_bounds(cell);
+  // MenuLayer pre-sets the text color (normal=black, highlight=white) and fills the
+  // cell background before this callback, so just draw the label.
+  graphics_draw_text(gctx, dl_row_label(ci->row, running),
+    fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+    GRect(6, 1, b.size.w - 12, b.size.h - 1),
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  int idx = s_detail_idx;
   if (idx < 0 || idx >= s_count) { return; }
   Timer *t = &s_timers[idx];
-  if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
-  else { tc_start(t, now_s()); }
-  persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
-  select_timer_row(idx);
-  if (t->state == TS_RUNNING) { return_to_watchface(); }
-}
-
-static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
-  int idx = (int)(intptr_t)action_menu_get_context(am);
-  if (idx < 0 || idx >= s_count) { return; }
-  tc_reset(&s_timers[idx], now_s());
-  persist_all(); rearm_wakeup(); reload_ui();
-  select_timer_row(idx);
-}
-
-static void act_add_time(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
-  int idx = (int)(intptr_t)action_menu_get_context(am);
-  if (idx < 0 || idx >= s_count) { return; }
-  int32_t secs = (int32_t)(intptr_t)action_menu_item_get_action_data(item);
-  tc_add(&s_timers[idx], secs, now_s());
-  persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
-  select_timer_row(idx);
-}
-
-// Free the level hierarchy after the menu closes (else it leaks per open).
-static void action_menu_did_close(ActionMenu *am, const ActionMenuItem *performed, void *ctx) {
-  action_menu_hierarchy_destroy(action_menu_get_root_level(am), NULL, NULL);
-  s_action_root = NULL;
-}
-
-static void open_action_menu(int timer_idx) {
-  Timer *t = &s_timers[timer_idx];
-  bool addable = (t->state == TS_RUNNING || t->state == TS_PAUSED);
-  int count = addable ? 5 : 2;
-  s_action_root = action_menu_level_create(count);
-  action_menu_level_add_action(s_action_root,
-    (t->state == TS_RUNNING) ? "Pause" : "Start", act_toggle, NULL);
-  if (addable) {
-    action_menu_level_add_action(s_action_root, "+1 min",  act_add_time, (void *)(intptr_t)60);
-    action_menu_level_add_action(s_action_root, "+5 min",  act_add_time, (void *)(intptr_t)300);
-    action_menu_level_add_action(s_action_root, "+10 min", act_add_time, (void *)(intptr_t)600);
+  if (ci->row == 0) {                 // Pause / Start -> keep window open
+    if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
+    else { tc_start(t, now_s()); }
+    persist_all(); rearm_wakeup(); ensure_ticking();
+    reload_ui(); menu_layer_reload_data(s_detail_menu);
+  } else if (ci->row == 1) {          // Reset -> back to the list
+    tc_reset(t, now_s());
+    persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
+    window_stack_remove(s_detail_window, true);
+  } else if (detail_addable()) {      // +1 / +5 / +10 min -> keep window open
+    int32_t secs = (ci->row == 2) ? 60 : (ci->row == 3) ? 300 : 600;
+    tc_add(t, secs, now_s());
+    persist_all(); rearm_wakeup(); ensure_ticking();
+    reload_ui(); menu_layer_reload_data(s_detail_menu);
   }
-  action_menu_level_add_action(s_action_root, "Reset", act_reset, NULL);
-  ActionMenuConfig cfg = {
-    .root_level = s_action_root,
-    .context = (void *)(intptr_t)timer_idx,
-    .colors = { .background = GColorChromeYellow, .foreground = GColorBlack },
-    .did_close = action_menu_did_close,
-    .align = ActionMenuAlignCenter,
-  };
-  action_menu_open(&cfg);
+}
+
+static void detail_window_load(Window *w) {
+  Layer *root = window_get_root_layer(w);
+  s_detail_menu = menu_layer_create(layer_get_bounds(root));
+  menu_layer_set_callbacks(s_detail_menu, NULL, (MenuLayerCallbacks){
+    .get_num_rows = dl_num_rows,
+    .get_cell_height = dl_cell_height,
+    .get_header_height = dl_header_height,
+    .draw_header = dl_draw_header,
+    .draw_row = dl_draw_row,
+    .select_click = dl_select,
+  });
+  menu_layer_set_normal_colors(s_detail_menu, GColorWhite, GColorBlack);
+  menu_layer_set_highlight_colors(s_detail_menu, GColorBlack, GColorWhite);
+  menu_layer_set_click_config_onto_window(s_detail_menu, w);
+  layer_add_child(root, menu_layer_get_layer(s_detail_menu));
+}
+
+static void detail_window_unload(Window *w) {
+  menu_layer_destroy(s_detail_menu); s_detail_menu = NULL;
+}
+
+static void open_detail_window(int timer_idx) {
+  s_detail_idx = timer_idx;
+  if (!s_detail_window) {
+    s_detail_window = window_create();
+    window_set_window_handlers(s_detail_window, (WindowHandlers){
+      .load = detail_window_load, .unload = detail_window_unload });
+  }
+  window_stack_push(s_detail_window, true);
 }
 
 // ---- MenuLayer callbacks ----
@@ -357,7 +414,7 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     select_timer_row(idx);
     return_to_watchface();
   } else {
-    open_action_menu(idx);
+    open_detail_window(idx);
   }
 }
 
