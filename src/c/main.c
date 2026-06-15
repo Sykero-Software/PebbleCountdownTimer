@@ -31,6 +31,7 @@ static int s_count = 0;
 static int s_order[MAX_TIMERS];   // display order, rebuilt on reload per s_sort
 static SortMode s_sort = SORT_MRU;
 static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
+static bool s_auto_return = false; // config: pop to watchface after a start/resume
 
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
@@ -249,6 +250,14 @@ static void select_timer_row(int idx) {
   }
 }
 
+// Config option: leave the app (-> watchface) after a timer is started/resumed.
+// The wakeup keeps a closed app's timer firing, so the alarm still triggers.
+// Calling window_stack_pop_all from inside an ActionMenu callback is safe: the
+// SDK fires did_close during the unwind, which frees the level hierarchy.
+static void return_to_watchface(void) {
+  if (s_auto_return) { window_stack_pop_all(true); }
+}
+
 static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   int idx = (int)(intptr_t)action_menu_get_context(am);
   if (idx < 0 || idx >= s_count) { return; }
@@ -257,6 +266,7 @@ static void act_toggle(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   else { tc_start(t, now_s()); }
   persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
   select_timer_row(idx);
+  if (t->state == TS_RUNNING) { return_to_watchface(); }
 }
 
 static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
@@ -345,6 +355,7 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     tc_start(&s_timers[idx], now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
     select_timer_row(idx);
+    return_to_watchface();
   } else {
     open_action_menu(idx);
   }
@@ -358,6 +369,11 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     if (m < SORT_MRU || m > SORT_LONGEST) { m = SORT_MRU; }
     s_sort = (SortMode)m;
     store_save_sort(s_sort);
+  }
+  Tuple *autoret = dict_find(iter, MESSAGE_KEY_AutoReturn);
+  if (autoret) {
+    s_auto_return = autoret->value->int32 != 0;
+    store_save_autoreturn(s_auto_return);
   }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
@@ -415,6 +431,7 @@ static void window_unload(Window *w) { menu_layer_destroy(s_menu); s_menu = NULL
 static void init(void) {
   s_count = store_load(s_timers);
   s_sort = (SortMode)store_load_sort();
+  s_auto_return = store_load_autoreturn();
 #ifdef SCREENSHOT_FIXTURES
   if (s_count == 0) {
     s_count = 3;
