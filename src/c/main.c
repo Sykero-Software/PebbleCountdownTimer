@@ -287,7 +287,7 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
   GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   graphics_context_set_text_color(gctx, GColorBlack);
   if (t->name[0]) {
-    graphics_draw_text(gctx, t->name, f, GRect(4, 2, b.size.w - 60, 22),
+    graphics_draw_text(gctx, t->name, f, GRect(4, 2, b.size.w - 80, 22),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     graphics_draw_text(gctx, rem, f, GRect(4, 2, b.size.w - 8, 22),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
