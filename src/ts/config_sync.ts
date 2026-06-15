@@ -16,5 +16,9 @@
 export function resendDict(get: (k: string) => string | null): Record<string, any> | null {
   const tc = get('timer_config');
   if (tc === null) { return null; }
-  return { TimerConfig: tc, SortOrder: parseInt(get('sort_order') || '0', 10) || 0 };
+  return {
+    TimerConfig: tc,
+    SortOrder: parseInt(get('sort_order') || '0', 10) || 0,
+    AutoReturn: parseInt(get('auto_return') || '0', 10) || 0,
+  };
 }

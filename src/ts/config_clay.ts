@@ -26,6 +26,8 @@ const config = [
           { label: 'Shortest remaining first', value: '1' },
           { label: 'Longest remaining first', value: '2' },
         ] },
+      { type: 'toggle', messageKey: 'AutoReturn',
+        label: 'Return to watchface after starting a timer', defaultValue: false },
     ],
   },
   { type: 'submit', defaultValue: 'Save' },

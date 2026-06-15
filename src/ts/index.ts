@@ -35,9 +35,11 @@ Pebble.addEventListener('webviewclosed', (e: any) => {
   const dict: Record<string, any> = {};
   dict.TimerConfig = timerListToString(s.TimerList);
   dict.SortOrder = parseInt(s.SortOrder, 10) || 0;
+  dict.AutoReturn = s.AutoReturn ? 1 : 0;
   // persist so we can re-send when the watchapp later launches and asks (above)
   window.localStorage.setItem('timer_config', dict.TimerConfig);
   window.localStorage.setItem('sort_order', String(dict.SortOrder));
+  window.localStorage.setItem('auto_return', String(dict.AutoReturn));
   console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder);
   Pebble.sendAppMessage(dict, () => { console.log('config sent'); },
     () => { console.log('config send failed'); });
