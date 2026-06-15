@@ -267,6 +267,15 @@ static void act_reset(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
   select_timer_row(idx);
 }
 
+static void act_add_time(ActionMenu *am, const ActionMenuItem *item, void *ctx) {
+  int idx = (int)(intptr_t)action_menu_get_context(am);
+  if (idx < 0 || idx >= s_count) { return; }
+  int32_t secs = (int32_t)(intptr_t)action_menu_item_get_action_data(item);
+  tc_add(&s_timers[idx], secs, now_s());
+  persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+  select_timer_row(idx);
+}
+
 // Free the level hierarchy after the menu closes (else it leaks per open).
 static void action_menu_did_close(ActionMenu *am, const ActionMenuItem *performed, void *ctx) {
   action_menu_hierarchy_destroy(action_menu_get_root_level(am), NULL, NULL);
@@ -274,10 +283,17 @@ static void action_menu_did_close(ActionMenu *am, const ActionMenuItem *performe
 }
 
 static void open_action_menu(int timer_idx) {
-  s_action_root = action_menu_level_create(2);
   Timer *t = &s_timers[timer_idx];
+  bool addable = (t->state == TS_RUNNING || t->state == TS_PAUSED);
+  int count = addable ? 5 : 2;
+  s_action_root = action_menu_level_create(count);
   action_menu_level_add_action(s_action_root,
     (t->state == TS_RUNNING) ? "Pause" : "Start", act_toggle, NULL);
+  if (addable) {
+    action_menu_level_add_action(s_action_root, "+1 min",  act_add_time, (void *)(intptr_t)60);
+    action_menu_level_add_action(s_action_root, "+5 min",  act_add_time, (void *)(intptr_t)300);
+    action_menu_level_add_action(s_action_root, "+10 min", act_add_time, (void *)(intptr_t)600);
+  }
   action_menu_level_add_action(s_action_root, "Reset", act_reset, NULL);
   ActionMenuConfig cfg = {
     .root_level = s_action_root,
