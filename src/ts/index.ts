@@ -40,7 +40,7 @@ Pebble.addEventListener('webviewclosed', (e: any) => {
   window.localStorage.setItem('timer_config', dict.TimerConfig);
   window.localStorage.setItem('sort_order', String(dict.SortOrder));
   window.localStorage.setItem('auto_return', String(dict.AutoReturn));
-  console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder);
+  console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder + ' autoReturn=' + dict.AutoReturn);
   Pebble.sendAppMessage(dict, () => { console.log('config sent'); },
     () => { console.log('config send failed'); });
 });

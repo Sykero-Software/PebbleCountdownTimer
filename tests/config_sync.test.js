@@ -30,3 +30,7 @@ test('resendDict: missing/garbage sort_order defaults to 0', () => {
 test('resendDict: missing auto_return defaults to 0', () => {
   assert.strictEqual(resendDict(store({ timer_config: 'a\x1f60' })).AutoReturn, 0);
 });
+
+test('resendDict: saved auto_return "0" round-trips to 0', () => {
+  assert.strictEqual(resendDict(store({ timer_config: 'a\x1f60', auto_return: '0' })).AutoReturn, 0);
+});
