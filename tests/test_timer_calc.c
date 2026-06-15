@@ -91,6 +91,25 @@ int main(void) {
   assert(outr[0].state == TS_RUNNING && outr[0].end_time == 9999 && outr[0].last_used == 42);
   assert(outr[1].state == TS_IDLE && outr[1].duration == 60 && strcmp(outr[1].name, "New") == 0);
 
+  // --- tc_add: running extends end_time; paused grows remaining; stamps last_used ---
+  Timer a; memset(&a, 0, sizeof(a)); a.duration = 300;
+  tc_start(&a, 1000);                 // RUNNING, end_time = 1300
+  tc_add(&a, 300, 1100);             // +5 min while running
+  assert(a.state == TS_RUNNING && a.end_time == 1600 && a.last_used == 1100);
+  assert(tc_remaining_now(&a, 1100) == 500);
+
+  Timer p; memset(&p, 0, sizeof(p)); p.duration = 600; p.state = TS_PAUSED; p.remaining = 120;
+  tc_add(&p, 60, 2000);             // +1 min while paused
+  assert(p.state == TS_PAUSED && p.remaining == 180 && p.last_used == 2000);
+
+  // idle / done: no-op (state and timing unchanged)
+  Timer id; memset(&id, 0, sizeof(id)); id.duration = 90; id.state = TS_IDLE; id.remaining = 90;
+  tc_add(&id, 600, 3000);
+  assert(id.state == TS_IDLE && id.remaining == 90 && id.last_used == 0);
+  Timer dn; memset(&dn, 0, sizeof(dn)); dn.state = TS_DONE; dn.remaining = 0;
+  tc_add(&dn, 600, 3000);
+  assert(dn.state == TS_DONE && dn.remaining == 0 && dn.last_used == 0);
+
   printf("All timer_calc tests passed\n");
   return 0;
 }

@@ -48,6 +48,11 @@ void tc_reset(Timer *t, int64_t now);
 // of its current state. Sets RUNNING, end_time = now + secs, stamps last_used.
 void tc_extend(Timer *t, int32_t secs, int64_t now);
 
+// Add `secs` to the time left. RUNNING: end_time += secs (extends the live
+// countdown). PAUSED: remaining += secs (clamped >= 0). IDLE/DONE: no-op. Stamps
+// last_used = now. Distinct from tc_extend, which SETS end_time and forces RUNNING.
+void tc_add(Timer *t, int32_t secs, int64_t now);
+
 // If RUNNING and end_time <= now: mark DONE, remaining 0, return true. Else false.
 bool tc_check_expiry(Timer *t, int64_t now);
 

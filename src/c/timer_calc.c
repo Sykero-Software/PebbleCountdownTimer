@@ -132,6 +132,18 @@ void tc_extend(Timer *t, int32_t secs, int64_t now) {
   t->last_used = now;
 }
 
+void tc_add(Timer *t, int32_t secs, int64_t now) {
+  if (t->state == TS_RUNNING) {
+    t->end_time += secs;
+  } else if (t->state == TS_PAUSED) {
+    t->remaining += secs;
+    if (t->remaining < 0) { t->remaining = 0; }
+  } else {
+    return;   // IDLE/DONE: not applicable
+  }
+  t->last_used = now;
+}
+
 bool tc_check_expiry(Timer *t, int64_t now) {
   if (t->state == TS_RUNNING && t->end_time <= now) {
     t->state = TS_DONE;
