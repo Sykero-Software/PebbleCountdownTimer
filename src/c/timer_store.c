@@ -54,7 +54,7 @@ void store_save_sort(int mode) {
 }
 
 bool store_load_autoreturn(void) {
-  if (!persist_exists(PERSIST_KEY_AUTORETURN)) { return false; }
+  if (!persist_exists(PERSIST_KEY_AUTORETURN)) { return true; }   // default ON
   return persist_read_bool(PERSIST_KEY_AUTORETURN);
 }
 

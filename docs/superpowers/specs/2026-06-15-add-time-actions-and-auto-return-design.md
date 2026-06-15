@@ -77,7 +77,7 @@ Add `tc_add` cases to `tests/test_timer_calc.c`:
 
 ### Behaviour
 
-A config toggle "Return to watchface after starting a timer" (default **off**).
+A config toggle "Return to watchface after starting or stopping a timer" (default **on**).
 When on, the app exits to the watchface (`window_stack_pop_all`) after a timer
 transitions to **RUNNING**, on **any start/resume**:
 
@@ -95,7 +95,7 @@ Add to the **Display** section:
 
 ```ts
 { type: 'toggle', messageKey: 'AutoReturn',
-  label: 'Return to watchface after starting a timer', defaultValue: false }
+  label: 'Return to watchface after starting or stopping a timer', defaultValue: true }
 ```
 
 ### Message key — `package.json`
@@ -127,7 +127,7 @@ Android-side positional ints do — but appending is still the rule):
 - `timer_store.h`: `#define PERSIST_KEY_AUTORETURN 5`; declare
   `bool store_load_autoreturn(void)` / `void store_save_autoreturn(bool)`.
 - `timer_store.c`: read/write via `persist_read_bool` / `persist_write_bool`
-  (default `false` when unset).
+  (default `true` when unset — must agree with the Clay `defaultValue`).
 - `main.c`:
   - `static bool s_auto_return;`
   - `init`: `s_auto_return = store_load_autoreturn();`
