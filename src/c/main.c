@@ -273,7 +273,7 @@ static bool detail_addable(void) {
 }
 
 static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
-  return detail_addable() ? 5 : 2;   // Pause/Start, Reset [, +1, +5, +10]
+  return detail_addable() ? 4 : 2;   // Pause/Start, Reset [, +1, -1]
 }
 static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
 static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
@@ -302,8 +302,7 @@ static const char *dl_row_label(int row, bool running) {
     case 0: return running ? "Pause" : "Start";
     case 1: return "Reset";
     case 2: return "+1 min";
-    case 3: return "+5 min";
-    case 4: return "+10 min";
+    case 3: return "-1 min";
     default: return "";
   }
 }
@@ -333,8 +332,8 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     tc_reset(t, now_s());
     persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
     window_stack_remove(s_detail_window, true);
-  } else if (detail_addable()) {      // +1 / +5 / +10 min -> keep window open
-    int32_t secs = (ci->row == 2) ? 60 : (ci->row == 3) ? 300 : 600;
+  } else if (detail_addable()) {      // +1 / -1 min -> keep window open
+    int32_t secs = (ci->row == 2) ? 60 : -60;
     tc_add(t, secs, now_s());
     persist_all(); rearm_wakeup(); ensure_ticking();
     reload_ui(); menu_layer_reload_data(s_detail_menu);
