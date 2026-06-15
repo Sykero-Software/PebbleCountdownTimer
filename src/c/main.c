@@ -114,12 +114,14 @@ static void alarm_buzz_stop(void) {
 }
 
 static void alarm_stop(ClickRecognizerRef rec, void *ctx) {
-  // Stop: reset the finished timer directly from the alarm, then dismiss.
+  // Stop: reset the finished timer directly from the alarm, then close the app
+  // (-> watchface). The alarm often fires while the app is closed (wakeup-launched),
+  // so after dismissing the user wants the watchface, not to be left in the app.
   if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
     tc_reset(&s_timers[s_alarm_idx], now_s());
     persist_all(); rearm_wakeup(); reload_ui();
   }
-  window_stack_remove(s_alarm_window, true);
+  window_stack_pop_all(true);
 }
 
 static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
