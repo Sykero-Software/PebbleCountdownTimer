@@ -16,7 +16,11 @@
     "capabilities": [],
     "watchapp": { "watchface": false },
     "messageKeys": ["TimerConfig", "SortOrder", "Request", "AutoReturn"],
-    "resources": { "media": [] }
+    "resources": {
+      "media": [
+        { "type": "bitmap", "menuIcon": true, "name": "MENU_ICON", "file": "images/menuicon.png" }
+      ]
+    }
   },
   "devDependencies": {
     "typescript": "^6.0.3"
