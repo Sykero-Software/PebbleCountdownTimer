@@ -52,3 +52,12 @@ int store_load_sort(void) {
 void store_save_sort(int mode) {
   persist_write_int(PERSIST_KEY_SORTORDER, mode);
 }
+
+bool store_load_autoreturn(void) {
+  if (!persist_exists(PERSIST_KEY_AUTORETURN)) { return false; }
+  return persist_read_bool(PERSIST_KEY_AUTORETURN);
+}
+
+void store_save_autoreturn(bool on) {
+  persist_write_bool(PERSIST_KEY_AUTORETURN, on);
+}

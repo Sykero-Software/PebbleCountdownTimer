@@ -8,6 +8,7 @@
 #define PERSIST_KEY_COUNT     2
 #define PERSIST_KEY_WAKEUPID  3
 #define PERSIST_KEY_SORTORDER 4
+#define PERSIST_KEY_AUTORETURN 5
 #define PERSIST_KEY_TIMER_BASE 100   // timer i -> key 100+i (one Timer per key; 256B/key cap)
 #define STORE_SCHEMA 1
 
@@ -21,3 +22,6 @@ void store_save_wakeup_id(int32_t id);
 // Sort mode (defaults to SORT_MRU=0 when unset).
 int store_load_sort(void);
 void store_save_sort(int mode);
+// Auto-return-to-watchface flag (defaults to false when unset).
+bool store_load_autoreturn(void);
+void store_save_autoreturn(bool on);
