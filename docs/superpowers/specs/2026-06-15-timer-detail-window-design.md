@@ -67,11 +67,13 @@ MenuLayer header via `.get_header_height` (returns a compact height, ~26 px) and
 
 | State    | Rows                                    |
 |----------|-----------------------------------------|
-| RUNNING  | `Pause` `Reset` `+1 min` `-1 min`        |
-| PAUSED   | `Start` `Reset` `+1 min` `-1 min`        |
-| DONE     | `Start` `Reset`                          |
+| RUNNING  | `Pause` `Stop` `+1 min` `-1 min`         |
+| PAUSED   | `Start` `Stop` `+1 min` `-1 min`         |
+| DONE     | `Start` `Stop`                           |
 
-Row 0 label is `Pause` when RUNNING else `Start`. The `+1 min` / `-1 min` rows only
+Row 1 `Stop` resets the timer to idle (`tc_reset`) — named "Stop" for consistency
+with the alarm's Stop button. The alarm's `+1 Min` snooze also opens this detail
+window for the snoozed timer. Row 0 label is `Pause` when RUNNING else `Start`. The `+1 min` / `-1 min` rows only
 exist when RUNNING or PAUSED (`addable`). `get_num_rows` returns `addable ? 4 : 2`.
 `-1 min` subtracts a minute (`tc_add(..., -60, ...)`); floored at 0 by `tc_add`
 for a paused timer, and for a running timer with under a minute left it reaches the
@@ -97,7 +99,7 @@ state's row set:
   (`reload_ui`) AND reload the detail menu (`menu_layer_reload_data(s_detail_menu)`,
   which also redraws the header and the row-0 label that just toggled). Window stays
   open. NO auto-return.
-- **Reset (row 1):** `tc_reset(...)`; `persist_all(); rearm_wakeup(); reload_ui();`
+- **Stop (row 1):** `tc_reset(...)`; `persist_all(); rearm_wakeup(); reload_ui();`
   then `window_stack_remove(s_detail_window, true)` to pop back to the list (the
   timer is now IDLE; the detail window has no IDLE row set). The list cursor follows
   via `select_timer_row(idx)` before popping.

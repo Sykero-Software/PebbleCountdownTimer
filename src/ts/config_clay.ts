@@ -11,7 +11,7 @@ const config = [
     type: 'section',
     items: [
       { type: 'heading', defaultValue: 'Timers' },
-      { type: 'text', defaultValue: 'Add timers below. On the watch, open a timer to Start/Pause/Reset it.' },
+      { type: 'text', defaultValue: 'Add timers below. On the watch, open a timer to Start/Pause/Stop it.' },
       { type: 'timerList', messageKey: 'TimerList', defaultValue: [{ name: '', seconds: 0 }] },
     ],
   },

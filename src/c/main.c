@@ -33,7 +33,7 @@ static SortMode s_sort = SORT_MRU;
 static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
 static bool s_auto_return = false; // config: pop to watchface after a start/resume
 
-// ---- per-timer detail window: live-time header + Pause/Reset/+N actions ----
+// ---- per-timer detail window: live-time header + Pause/Stop/+N actions ----
 static Window *s_detail_window;
 static MenuLayer *s_detail_menu;
 static int s_detail_idx = -1;   // config index the detail window is showing
@@ -69,6 +69,7 @@ static void reload_ui(void) {
 }
 
 static void ensure_ticking(void);   // defined below; used by the alarm handlers
+static void open_detail_window(int timer_idx);  // defined below; used by the alarm snooze
 
 // Mark every expired RUNNING timer DONE. Returns the count that NEWLY expired and
 // sets s_last_fired_idx to the first of them (drives the alarm screen). No UI here.
@@ -125,12 +126,18 @@ static void alarm_stop(ClickRecognizerRef rec, void *ctx) {
 }
 
 static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
-  // Snooze: run the finished timer for 1 more minute, then dismiss the alarm.
-  if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
-    tc_extend(&s_timers[s_alarm_idx], 60, now_s());
+  // Snooze: run the finished timer for 1 more minute, dismiss the alarm, and land on
+  // that timer's own detail window. Push the detail window over the alarm first, then
+  // silently drop the alarm from beneath it (no flash back to the list).
+  int idx = s_alarm_idx;
+  if (idx >= 0 && idx < s_count) {
+    tc_extend(&s_timers[idx], 60, now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+    open_detail_window(idx);
+    window_stack_remove(s_alarm_window, false);
+  } else {
+    window_stack_remove(s_alarm_window, true);
   }
-  window_stack_remove(s_alarm_window, true);
 }
 
 static void alarm_click_config(void *ctx) {
@@ -244,7 +251,7 @@ static void ensure_ticking(void) {
   }
 }
 
-// ---- per-timer detail window: live-time header + Pause/Reset/+N actions ----
+// ---- per-timer detail window: live-time header + Pause/Stop/+N actions ----
 
 // After acting on a timer it re-sorts (e.g. floats to the top in MRU mode); move the
 // LIST cursor to follow it to its new row so the user needn't scroll to it.
@@ -275,7 +282,7 @@ static bool detail_addable(void) {
 }
 
 static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
-  return detail_addable() ? 4 : 2;   // Pause/Start, Reset [, +1, -1]
+  return detail_addable() ? 4 : 2;   // Pause/Start, Stop [, +1, -1]
 }
 static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
 static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
@@ -302,7 +309,7 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
 static const char *dl_row_label(int row, bool running) {
   switch (row) {
     case 0: return running ? "Pause" : "Start";
-    case 1: return "Reset";
+    case 1: return "Stop";
     case 2: return "+1 min";
     case 3: return "-1 min";
     default: return "";
@@ -330,7 +337,7 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     else { tc_start(t, now_s()); }
     persist_all(); rearm_wakeup(); ensure_ticking();
     reload_ui(); menu_layer_reload_data(s_detail_menu);
-  } else if (ci->row == 1) {          // Reset -> back to the list
+  } else if (ci->row == 1) {          // Stop (reset) -> back to the list
     tc_reset(t, now_s());
     persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
     window_stack_remove(s_detail_window, true);
@@ -370,7 +377,13 @@ static void open_detail_window(int timer_idx) {
     window_set_window_handlers(s_detail_window, (WindowHandlers){
       .load = detail_window_load, .unload = detail_window_unload });
   }
-  window_stack_push(s_detail_window, true);
+  // Idempotent: if it is already on the stack (e.g. it was open under the alarm when
+  // a timer expired), just refresh it instead of pushing it a second time.
+  if (window_stack_contains_window(s_detail_window)) {
+    if (s_detail_menu) { menu_layer_reload_data(s_detail_menu); }
+  } else {
+    window_stack_push(s_detail_window, true);
+  }
 }
 
 // ---- MenuLayer callbacks ----
