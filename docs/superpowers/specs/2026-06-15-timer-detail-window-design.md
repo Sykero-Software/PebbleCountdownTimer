@@ -99,10 +99,13 @@ state's row set:
   (`reload_ui`) AND reload the detail menu (`menu_layer_reload_data(s_detail_menu)`,
   which also redraws the header and the row-0 label that just toggled). Window stays
   open. NO auto-return.
-- **Stop (row 1):** `tc_reset(...)`; `persist_all(); rearm_wakeup(); reload_ui();`
-  then `window_stack_remove(s_detail_window, true)` to pop back to the list (the
-  timer is now IDLE; the detail window has no IDLE row set). The list cursor follows
-  via `select_timer_row(idx)` before popping.
+- **Stop (row 1):** `tc_reset(...)`; `persist_all(); rearm_wakeup(); reload_ui();
+  select_timer_row(idx);` then, if the `AutoReturn` config option is on,
+  `window_stack_pop_all(true)` to close the app (→ watchface); otherwise
+  `window_stack_remove(s_detail_window, true)` to pop back to the list (the timer is
+  now IDLE; the detail window has no IDLE row set). The `AutoReturn` toggle thus
+  governs both starting (idle one-tap) and stopping; its label reads "Return to
+  watchface after starting or stopping a timer".
 - **`+1 min` / `-1 min` (rows 2-3, only when addable):** `tc_add(..., 60, ...)` /
   `tc_add(..., -60, ...)`; `persist_all(); rearm_wakeup(); ensure_ticking();`
   `reload_ui()` + `menu_layer_reload_data(s_detail_menu)` (header time jumps). Window

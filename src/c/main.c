@@ -337,10 +337,12 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     else { tc_start(t, now_s()); }
     persist_all(); rearm_wakeup(); ensure_ticking();
     reload_ui(); menu_layer_reload_data(s_detail_menu);
-  } else if (ci->row == 1) {          // Stop (reset) -> back to the list
+  } else if (ci->row == 1) {          // Stop (reset)
     tc_reset(t, now_s());
     persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
-    window_stack_remove(s_detail_window, true);
+    // AutoReturn on -> close the app (-> watchface); else just pop back to the list.
+    if (s_auto_return) { window_stack_pop_all(true); }
+    else { window_stack_remove(s_detail_window, true); }
   } else if (detail_addable()) {      // +1 / -1 min -> keep window open
     int32_t secs = (ci->row == 2) ? 60 : -60;
     tc_add(t, secs, now_s());
