@@ -311,7 +311,7 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
 static const char *dl_row_label(int row, TimerState st) {
   switch (row) {
     case 0: return (st == TS_RUNNING) ? "Pause" : "Start";   // paused/idle/done -> Start(=resume/start)
-    case 1: return (st == TS_IDLE || st == TS_DONE) ? "Save as new & start" : "Stop";
+    case 1: return (st == TS_IDLE || st == TS_DONE) ? "Start & Save" : "Stop";
     case 2: return "+1 min";
     case 3: return "-1 min";
     default: return "";
