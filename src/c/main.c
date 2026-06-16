@@ -38,6 +38,8 @@ static bool s_running_first = true; // config: float RUNNING timers to the top
 static Window *s_detail_window;
 static MenuLayer *s_detail_menu;
 static int s_detail_idx = -1;   // config index the detail window is showing
+static DetailAction s_detail_acts[7];   // rebuilt per reload by dl_rebuild_actions
+static int s_detail_act_count = 0;
 
 // ---- transient "Started" confirmation shown ~1.1s before auto-return closes the app ----
 static Window  *s_confirm_window;
@@ -283,16 +285,42 @@ static void select_timer_row(int idx) {
   }
 }
 
-// Startable = the detail window's timer can be started fresh (idle or done); these
-// states offer "Save as new & start" instead of "Stop".
-static bool detail_startable(void) {
-  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return false; }
-  TimerState st = s_timers[s_detail_idx].state;
-  return st == TS_IDLE || st == TS_DONE;
+static void dl_rebuild_actions(void) {
+  if (s_detail_idx < 0 || s_detail_idx >= s_count) { s_detail_act_count = 0; return; }
+  Timer *t = &s_timers[s_detail_idx];
+  s_detail_act_count = tc_detail_actions(t->state, tc_detail_changed(t), s_detail_acts);
+}
+
+// Move the detail cursor onto the row that now carries action `a` (the list can
+// grow when +/- introduces the Save row, so a repeated +/- press must follow its
+// button instead of landing on whatever shifted under the cursor).
+static void dl_select_action(DetailAction a) {
+  if (!s_detail_menu) { return; }
+  for (int r = 0; r < s_detail_act_count; r++) {
+    if (s_detail_acts[r] == a) {
+      menu_layer_set_selected_index(s_detail_menu,
+        (MenuIndex){ .section = 0, .row = (uint16_t)r }, MenuRowAlignNone, false);
+      return;
+    }
+  }
+}
+
+static const char *dl_action_label(DetailAction a) {
+  switch (a) {
+    case DACT_STOP:       return "Stop";
+    case DACT_PAUSE:      return "Pause";
+    case DACT_START:      return "Start";
+    case DACT_SAVE_START: return "Start & Save";
+    case DACT_PLUS:       return "+1 min";
+    case DACT_MINUS:      return "-1 min";
+    case DACT_DELETE:     return "Delete";
+  }
+  return "";
 }
 
 static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
-  return 4;   // row0 primary, row1 secondary, +1 min, -1 min
+  dl_rebuild_actions();
+  return (uint16_t)s_detail_act_count;
 }
 static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
 static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
@@ -316,57 +344,68 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
   }
 }
 
-static const char *dl_row_label(int row, TimerState st) {
-  switch (row) {
-    case 0: return (st == TS_RUNNING) ? "Pause" : "Start";   // paused/idle/done -> Start(=resume/start)
-    case 1: return (st == TS_IDLE || st == TS_DONE) ? "Start & Save" : "Stop";
-    case 2: return "+1 min";
-    case 3: return "-1 min";
-    default: return "";
-  }
-}
-
 static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
-  TimerState st = (s_detail_idx >= 0 && s_detail_idx < s_count)
-                  ? s_timers[s_detail_idx].state : TS_IDLE;
+  if (ci->row >= s_detail_act_count) { return; }
   GRect b = layer_get_bounds(cell);
-  graphics_draw_text(gctx, dl_row_label(ci->row, st),
+  graphics_draw_text(gctx, dl_action_label(s_detail_acts[ci->row]),
     fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
     GRect(6, 1, b.size.w - 12, b.size.h - 1),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
-static void save_as_new_and_start(int32_t secs);  // defined in Task 9
+static void save_as_new_and_start(int32_t secs);  // defined below
+static void open_delete_confirm(void);             // defined below (delete path)
+static void send_delete_timer(int32_t idx);        // defined below (delete path)
+static void remove_timer_at(int idx);              // defined below (delete path)
 
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   int idx = s_detail_idx;
   if (idx < 0 || idx >= s_count) { return; }
+  dl_rebuild_actions();
+  if (ci->row >= s_detail_act_count) { return; }
+  DetailAction a = s_detail_acts[ci->row];
   Timer *t = &s_timers[idx];
-  if (ci->row == 0) {                 // Pause / Start(resume/start) -> keep window open
-    if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
-    else { tc_start(t, now_s()); }
-    persist_all(); rearm_wakeup(); ensure_ticking();
-    reload_ui(); menu_layer_reload_data(s_detail_menu);
-  } else if (ci->row == 1 && detail_startable()) {   // Save as new & start
-    int32_t rem = tc_remaining_now(t, now_s());
-    save_as_new_and_start(rem >= 1 ? rem : t->duration);
-  } else if (ci->row == 1) {          // Stop (reset) -- running/paused
-    tc_reset(t, now_s());
-    persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
-    if (s_auto_return) { close_to_watchface(); }
-    else { window_stack_remove(s_detail_window, true); }
-  } else {                            // row 2/3: +1 / -1 min
-    int32_t secs = (ci->row == 2) ? 60 : -60;
-    if (t->state == TS_RUNNING || t->state == TS_PAUSED) {
-      tc_add(t, secs, now_s());
-    } else {                          // idle/done: adjust `remaining` (60s floor), keep template
-      int32_t r = t->remaining + secs;
-      if (r < 60) { r = 60; }
-      t->remaining = r;
-      t->last_used = now_s();
+  switch (a) {
+    case DACT_PAUSE:
+      tc_pause(t, now_s());
+      persist_all(); rearm_wakeup(); ensure_ticking();
+      reload_ui(); menu_layer_reload_data(s_detail_menu);
+      break;
+    case DACT_START:                    // start (idle/done) or resume (paused), in place
+      tc_start(t, now_s());
+      persist_all(); rearm_wakeup(); ensure_ticking();
+      reload_ui(); menu_layer_reload_data(s_detail_menu);
+      break;
+    case DACT_SAVE_START: {             // only present when the time was tuned -> never a dup
+      int32_t rem = tc_remaining_now(t, now_s());
+      save_as_new_and_start(rem >= 1 ? rem : t->duration);
+      break;
     }
-    persist_all(); rearm_wakeup(); ensure_ticking();
-    reload_ui(); menu_layer_reload_data(s_detail_menu);
+    case DACT_STOP:                     // reset to idle
+      tc_reset(t, now_s());
+      persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
+      if (s_auto_return) { close_to_watchface(); }
+      else { window_stack_remove(s_detail_window, true); }
+      break;
+    case DACT_PLUS:
+    case DACT_MINUS: {
+      int32_t secs = (a == DACT_PLUS) ? 60 : -60;
+      if (t->state == TS_RUNNING || t->state == TS_PAUSED) {
+        tc_add(t, secs, now_s());
+      } else {                          // idle/done: adjust `remaining` (60s floor), keep template
+        int32_t r = t->remaining + secs;
+        if (r < 60) { r = 60; }
+        t->remaining = r;
+        t->last_used = now_s();
+      }
+      persist_all(); rearm_wakeup(); ensure_ticking();
+      reload_ui(); menu_layer_reload_data(s_detail_menu);
+      dl_select_action(a);              // keep the cursor on the +/- button as the list grows
+      break;
+    }
+    case DACT_DELETE:
+      open_delete_confirm();
+      break;
   }
 }
 
