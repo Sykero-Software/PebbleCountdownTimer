@@ -126,6 +126,24 @@ int main(void) {
   tc_add(&dn, 600, 3000);
   assert(dn.state == TS_DONE && dn.remaining == 0 && dn.last_used == 0);
 
+  // --- tc_start: non-running timers start from `remaining` (one-off adjust) ---
+  // idle, remaining bumped above duration -> starts from remaining
+  Timer si; memset(&si, 0, sizeof(si)); si.duration = 300; si.state = TS_IDLE; si.remaining = 420;
+  tc_start(&si, 1000);
+  assert(si.state == TS_RUNNING && si.end_time == 1420);
+  // idle, remaining == duration (normal) -> unchanged behavior
+  Timer sn; memset(&sn, 0, sizeof(sn)); sn.duration = 300; sn.state = TS_IDLE; sn.remaining = 300;
+  tc_start(&sn, 1000);
+  assert(sn.end_time == 1300);
+  // done, remaining 0 -> falls back to duration
+  Timer sd; memset(&sd, 0, sizeof(sd)); sd.duration = 90; sd.state = TS_DONE; sd.remaining = 0;
+  tc_start(&sd, 1000);
+  assert(sd.end_time == 1090);
+  // done, remaining adjusted up -> starts from remaining
+  Timer sda; memset(&sda, 0, sizeof(sda)); sda.duration = 90; sda.state = TS_DONE; sda.remaining = 150;
+  tc_start(&sda, 1000);
+  assert(sda.end_time == 1150);
+
   printf("All timer_calc tests passed\n");
   return 0;
 }

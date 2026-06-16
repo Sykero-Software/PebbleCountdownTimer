@@ -106,8 +106,10 @@ void tc_display_order(const Timer *t, int count, SortMode mode, int64_t now, int
 }
 
 void tc_start(Timer *t, int64_t now) {
-  // resume from the paused remainder, otherwise start a full duration
-  int32_t rem = (t->state == TS_PAUSED) ? t->remaining : t->duration;
+  // Non-running timers start from `remaining` (PAUSED resume, or an IDLE/DONE
+  // timer whose duration was tuned with +/- before starting). Fall back to the
+  // full duration when remaining is unset/zero, so a plain Start is unchanged.
+  int32_t rem = (t->state == TS_RUNNING) ? t->duration : t->remaining;
   if (rem < 1) { rem = t->duration; }
   t->end_time = now + rem;
   t->state = TS_RUNNING;
