@@ -6,14 +6,23 @@ import clayConfig from './config_clay';
 import timerListComponent from './config_timer_list';
 import { timerListToString } from './timer_config';
 import { resendDict } from './config_sync';
+import { appendCustomTimer } from './add_timer';
 
 const clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 clay.registerComponent(timerListComponent);
 
-// The watch requests its config on launch (any inbound AppMessage); reply with
-// the last-saved values so config reaches the app even when it wasn't open at
-// Save time. See config_sync.ts for why a watchapp needs this handshake.
-Pebble.addEventListener('appmessage', () => {
+// Inbound from the watch: either a custom timer to save (AddTimer), or the launch
+// handshake (any other message) where we resend the last-saved config.
+Pebble.addEventListener('appmessage', (e: any) => {
+  const p = e && e.payload;
+  if (p && typeof p.AddTimer === 'number') {
+    appendCustomTimer(
+      (k) => window.localStorage.getItem(k),
+      (k, v) => window.localStorage.setItem(k, v),
+      p.AddTimer);
+    console.log('AddTimer saved: ' + p.AddTimer + 's');
+    return;   // no echo — the watch already holds the running timer locally as custom
+  }
   const dict = resendDict((k) => window.localStorage.getItem(k));
   if (!dict) { return; }
   Pebble.sendAppMessage(dict, () => { console.log('config resent'); },
