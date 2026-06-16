@@ -15,7 +15,7 @@
     "targetPlatforms": ["aplite", "basalt", "chalk", "diorite", "emery", "flint", "gabbro"],
     "capabilities": [],
     "watchapp": { "watchface": false },
-    "messageKeys": ["TimerConfig", "SortOrder", "Request", "AutoReturn", "RunningFirst", "AddTimer"],
+    "messageKeys": ["TimerConfig", "SortOrder", "Request", "AutoReturn", "RunningFirst", "AddTimer", "DeleteTimer"],
     "resources": {
       "media": [
         { "type": "bitmap", "menuIcon": true, "name": "MENU_ICON", "file": "images/menuicon.png" }

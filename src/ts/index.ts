@@ -7,6 +7,7 @@ import timerListComponent from './config_timer_list';
 import { timerListToString } from './timer_config';
 import { resendDict } from './config_sync';
 import { appendCustomTimer } from './add_timer';
+import { deleteTimer } from './delete_timer';
 
 const clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 clay.registerComponent(timerListComponent);
@@ -23,6 +24,15 @@ Pebble.addEventListener('appmessage', (e: any) => {
     console.log(saved ? 'AddTimer saved: ' + p.AddTimer + 's'
       : 'AddTimer rejected (invalid or full): ' + p.AddTimer);
     return;   // no echo — the watch already holds the running timer locally as custom
+  }
+  if (p && typeof p.DeleteTimer === 'number') {
+    const left = deleteTimer(
+      (k) => window.localStorage.getItem(k),
+      (k, v) => window.localStorage.setItem(k, v),
+      p.DeleteTimer);
+    console.log(left === null ? 'DeleteTimer rejected (out of range): ' + p.DeleteTimer
+      : 'DeleteTimer applied at index ' + p.DeleteTimer);
+    return;   // no echo — the watch already removed it locally
   }
   const dict = resendDict((k) => window.localStorage.getItem(k));
   if (!dict) { return; }
