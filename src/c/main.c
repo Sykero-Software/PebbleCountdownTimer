@@ -411,12 +411,26 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   }
   int idx = s_order[ci->row];
   Timer *t = &s_timers[idx];
+  // Tint non-selected rows by state (color displays only). The selected row keeps
+  // MenuLayer's standard highlight (black bg / white text) so the cursor is obvious.
+  MenuIndex sel = menu_layer_get_selected_index(s_menu);
+  if (menu_index_compare(&sel, ci) != 0) {
+    GColor bg = GColorWhite;
+    switch (t->state) {
+      case TS_RUNNING: bg = PBL_IF_COLOR_ELSE(GColorMintGreen, GColorWhite); break;
+      case TS_PAUSED:  bg = PBL_IF_COLOR_ELSE(GColorPastelYellow, GColorWhite); break;
+      case TS_DONE:    bg = PBL_IF_COLOR_ELSE(GColorMelon, GColorWhite); break;
+      default:         break;   // TS_IDLE -> white
+    }
+    graphics_context_set_fill_color(gctx, bg);
+    graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
+    graphics_context_set_text_color(gctx, GColorBlack);
+  }
   char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
   if (t->name[0]) {
     char sub[40]; snprintf(sub, sizeof(sub), "%s  %s", rem, state_label(t->state));
     menu_cell_basic_draw(gctx, cell, t->name, sub, NULL);
   } else {
-    // No name configured: show the time as the title, state as the subtitle.
     menu_cell_basic_draw(gctx, cell, rem, state_label(t->state), NULL);
   }
 }
