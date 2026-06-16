@@ -191,3 +191,27 @@ int tc_reconcile(const Timer *cur, int curN, const Timer *cfg, int cfgN, Timer *
   }
   return n;
 }
+
+bool tc_detail_changed(const Timer *t) {
+  if (t->state != TS_IDLE && t->state != TS_DONE) { return false; }
+  int32_t intended = (t->remaining >= 1) ? t->remaining : t->duration;
+  return intended != t->duration;
+}
+
+int tc_detail_actions(TimerState st, bool changed, DetailAction *out) {
+  int n = 0;
+  if (st == TS_RUNNING) {
+    out[n++] = DACT_STOP;
+    out[n++] = DACT_PAUSE;
+  } else if (st == TS_PAUSED) {
+    out[n++] = DACT_STOP;
+    out[n++] = DACT_START;   // resume
+  } else {                   // TS_IDLE / TS_DONE
+    out[n++] = DACT_START;
+    if (changed) { out[n++] = DACT_SAVE_START; }
+  }
+  out[n++] = DACT_PLUS;
+  out[n++] = DACT_MINUS;
+  out[n++] = DACT_DELETE;
+  return n;
+}
