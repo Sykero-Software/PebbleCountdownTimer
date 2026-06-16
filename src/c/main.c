@@ -329,7 +329,6 @@ static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
 }
 
 static void save_as_new_and_start(int32_t secs);  // defined in Task 9
-static void save_as_new_and_start(int32_t secs) { (void)secs; }  // temporary stub
 
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   int idx = s_detail_idx;
@@ -597,6 +596,44 @@ static void request_config(void) {
     dict_write_uint8(out, MESSAGE_KEY_Request, 1);
     app_message_outbox_send();
   }
+}
+
+// Tell the phone to save a new unnamed timer of `secs` seconds (appended to its
+// TimerConfig + Clay store). The watch keeps the running timer locally (flagged
+// custom) so it survives even if this send fails / the phone is offline.
+static void send_add_timer(int32_t secs) {
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) == APP_MSG_OK) {
+    dict_write_uint32(out, MESSAGE_KEY_AddTimer, (uint32_t)secs);
+    app_message_outbox_send();
+  }
+}
+
+// Create a NEW unnamed timer of `secs`, started now, appended at the end of the
+// list (so a later config reconcile aligns the phone's appended entry to this
+// running row by position). Persist, send AddTimer, then apply the normal start
+// tail (confirmation + auto-return).
+static void save_as_new_and_start(int32_t secs) {
+  if (s_count >= MAX_TIMERS) {
+    return;   // List full: nothing to create. (Keep it simple — no new row.)
+  }
+  if (secs < 1) { secs = 1; }
+  int idx = s_count;
+  Timer *t = &s_timers[idx];
+  memset(t, 0, sizeof(*t));
+  t->name[0] = 0;
+  t->duration = secs;
+  t->remaining = secs;
+  t->state = TS_IDLE;
+  t->custom = true;
+  tc_start(t, now_s());            // -> RUNNING, end_time = now + secs
+  s_count++;
+  persist_all(); rearm_wakeup(); ensure_ticking();
+  send_add_timer(secs);
+  reload_ui();
+  select_timer_row(idx);
+  if (s_auto_return) { show_start_confirmation(idx); }   // flash -> watchface
+  else { window_stack_remove(s_detail_window, true); }   // back to the list
 }
 
 // ---- window ----
