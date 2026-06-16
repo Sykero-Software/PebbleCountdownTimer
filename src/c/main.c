@@ -32,6 +32,7 @@ static int s_order[MAX_TIMERS];   // display order, rebuilt on reload per s_sort
 static SortMode s_sort = SORT_MRU;
 static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
 static bool s_auto_return = false; // config: pop to watchface after a start/resume
+static bool s_running_first = true; // config: float RUNNING timers to the top
 
 // ---- per-timer detail window: live-time header + Pause/Stop/+N actions ----
 static Window *s_detail_window;
@@ -61,7 +62,7 @@ static void rearm_wakeup(void) {
 
 static void persist_all(void) { store_save(s_timers, s_count); }
 
-static void rebuild_order(void) { tc_display_order(s_timers, s_count, s_sort, now_s(), s_order); }
+static void rebuild_order(void) { tc_display_order(s_timers, s_count, s_sort, now_s(), s_order, s_running_first); }
 
 static void reload_ui(void) {
   rebuild_order();
@@ -448,6 +449,11 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_auto_return = autoret->value->int32 != 0;
     store_save_autoreturn(s_auto_return);
   }
+  Tuple *runfirst = dict_find(iter, MESSAGE_KEY_RunningFirst);
+  if (runfirst) {
+    s_running_first = runfirst->value->int32 != 0;
+    store_save_runningfirst(s_running_first);
+  }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
     // static, NOT on the stack: two Timer[MAX_TIMERS] arrays are ~2 KB and would
@@ -505,6 +511,7 @@ static void init(void) {
   s_count = store_load(s_timers);
   s_sort = (SortMode)store_load_sort();
   s_auto_return = store_load_autoreturn();
+  s_running_first = store_load_runningfirst();
 #ifdef SCREENSHOT_FIXTURES
   if (s_count == 0) {
     s_count = 3;
