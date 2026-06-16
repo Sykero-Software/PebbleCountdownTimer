@@ -42,7 +42,7 @@ Pebble.addEventListener('webviewclosed', (e: any) => {
   window.localStorage.setItem('sort_order', String(dict.SortOrder));
   window.localStorage.setItem('auto_return', String(dict.AutoReturn));
   window.localStorage.setItem('running_first', String(dict.RunningFirst));
-  console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder + ' autoReturn=' + dict.AutoReturn);
+  console.log('Sending TimerConfig: ' + JSON.stringify(dict.TimerConfig) + ' sort=' + dict.SortOrder + ' autoReturn=' + dict.AutoReturn + ' runningFirst=' + dict.RunningFirst);
   Pebble.sendAppMessage(dict, () => { console.log('config sent'); },
     () => { console.log('config send failed'); });
 });
