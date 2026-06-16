@@ -43,6 +43,7 @@ bool tc_soonest_end(const Timer *t, int count, int64_t *out);
 void tc_display_order(const Timer *t, int count, SortMode mode, int64_t now, int *order, bool running_first);
 
 // State transitions (each stamps last_used = now where it represents a user action).
+// tc_start: non-running timers start from t->remaining (fallback t->duration when <1s); RUNNING restarts from duration.
 void tc_start(Timer *t, int64_t now);
 void tc_pause(Timer *t, int64_t now);
 void tc_reset(Timer *t, int64_t now);
@@ -62,5 +63,7 @@ bool tc_check_expiry(Timer *t, int64_t now);
 // Merge a freshly parsed config (cfg/cfgN) over current runtime state (cur/curN)
 // by list position into out (size MAX_TIMERS); returns new count. Unchanged rows
 // keep their state; duration-changed rows keep state with remaining re-derived
-// for non-RUNNING; new rows start IDLE; dropped rows disappear.
+// for non-RUNNING; new rows start IDLE; dropped rows disappear. Custom (watch-created)
+// rows beyond cfgN are appended after the config rows and preserved until a later config
+// absorbs them by position.
 int tc_reconcile(const Timer *cur, int curN, const Timer *cfg, int cfgN, Timer *out);

@@ -17,7 +17,7 @@ int main(void) {
   // skip zero/invalid durations; cap at MAX_TIMERS
   assert(tc_parse_config("a\x1f""0\x1e""b\x1f""60", t, MAX_TIMERS) == 1);
   assert(strcmp(t[0].name, "b") == 0);
-  // parsed timers are config-backed, never custom
+  // custom is false because tc_parse_config zeroes the struct (it doesn't set custom explicitly)
   assert(t[0].custom == false);
 
   // --- tc_format_remaining ---
@@ -168,6 +168,10 @@ int main(void) {
   Timer sda; memset(&sda, 0, sizeof(sda)); sda.duration = 90; sda.state = TS_DONE; sda.remaining = 150;
   tc_start(&sda, 1000);
   assert(sda.end_time == 1150);
+  // RUNNING restarts from duration
+  Timer sr; memset(&sr, 0, sizeof(sr)); sr.duration = 300; sr.state = TS_RUNNING; sr.end_time = 9999;
+  tc_start(&sr, 1000);
+  assert(sr.end_time == 1300);
 
   printf("All timer_calc tests passed\n");
   return 0;
