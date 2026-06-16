@@ -49,6 +49,11 @@ static char s_confirm_name[NAME_LEN + 1];
 static char s_confirm_time[16];
 static bool s_confirm_named;
 
+// ---- delete-confirm window: "Delete? <name>" + Select=delete / Back=cancel ----
+static Window  *s_del_window;
+static Layer   *s_del_layer;
+static char     s_del_name[NAME_LEN + 1];
+
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
 // Close the app to the WATCHFACE (not the launcher). exit_reason_set tells
@@ -430,6 +435,65 @@ static void detail_window_unload(Window *w) {
   menu_layer_destroy(s_detail_menu); s_detail_menu = NULL;
 }
 
+static void del_update_proc(Layer *layer, GContext *gctx) {
+  GRect b = layer_get_bounds(layer);
+  int cy = b.size.h / 2;
+  graphics_context_set_text_color(gctx, GColorBlack);
+  graphics_draw_text(gctx, "Delete?", fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+    GRect(4, cy - 52, b.size.w - 8, 32), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(gctx, s_del_name, fonts_get_system_font(FONT_KEY_GOTHIC_24),
+    GRect(4, cy - 16, b.size.w - 8, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  graphics_draw_text(gctx, "SELECT delete\nBACK cancel", fonts_get_system_font(FONT_KEY_GOTHIC_18),
+    GRect(4, cy + 22, b.size.w - 8, 44), GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+}
+
+static void del_window_load(Window *w) {
+  Layer *root = window_get_root_layer(w);
+  s_del_layer = layer_create(layer_get_bounds(root));
+  layer_set_update_proc(s_del_layer, del_update_proc);
+  layer_add_child(root, s_del_layer);
+}
+
+static void del_window_unload(Window *w) {
+  if (s_del_layer) { layer_destroy(s_del_layer); s_del_layer = NULL; }
+}
+
+// Select confirms: tell the phone, remove locally, then drop both the confirm and
+// the detail window so we land back on the LIST (delete is management, not an exit).
+static void del_confirm_select(ClickRecognizerRef rec, void *ctx) {
+  int idx = s_detail_idx;
+  if (idx >= 0 && idx < s_count) {
+    send_delete_timer(idx);
+    remove_timer_at(idx);
+    persist_all(); rearm_wakeup(); reload_ui();
+  }
+  s_detail_idx = -1;
+  window_stack_remove(s_del_window, false);
+  window_stack_remove(s_detail_window, true);
+}
+
+// Back is the implicit pop (cancel); only Select needs a handler.
+static void del_click_config(void *ctx) {
+  window_single_click_subscribe(BUTTON_ID_SELECT, del_confirm_select);
+}
+
+static void open_delete_confirm(void) {
+  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return; }
+  Timer *t = &s_timers[s_detail_idx];
+  if (t->name[0]) {
+    snprintf(s_del_name, sizeof(s_del_name), "%s", t->name);
+  } else {
+    tc_format_remaining(s_del_name, sizeof(s_del_name), tc_remaining_now(t, now_s()));
+  }
+  if (!s_del_window) {
+    s_del_window = window_create();
+    window_set_window_handlers(s_del_window, (WindowHandlers){
+      .load = del_window_load, .unload = del_window_unload });
+    window_set_click_config_provider(s_del_window, del_click_config);
+  }
+  window_stack_push(s_del_window, true);
+}
+
 static void open_detail_window(int timer_idx) {
   s_detail_idx = timer_idx;
   if (!s_detail_window) {
@@ -656,6 +720,24 @@ static void send_add_timer(int32_t secs) {
   }
 }
 
+// Tell the phone to drop the timer at list index `idx` from its TimerConfig +
+// Clay store. Best-effort, like send_add_timer: if it fails (phone offline) the
+// watch still removes it locally, but a later config reconcile will re-add it.
+static void send_delete_timer(int32_t idx) {
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) == APP_MSG_OK) {
+    dict_write_int32(out, MESSAGE_KEY_DeleteTimer, idx);
+    app_message_outbox_send();
+  }
+}
+
+// Remove the timer at `idx`, shifting the tail down. Caller persists + re-sorts.
+static void remove_timer_at(int idx) {
+  if (idx < 0 || idx >= s_count) { return; }
+  for (int i = idx; i < s_count - 1; i++) { s_timers[i] = s_timers[i + 1]; }
+  s_count--;
+}
+
 // Create a NEW unnamed timer of `secs`, started now, appended at the end of the
 // list (so a later config reconcile aligns the phone's appended entry to this
 // running row by position). Persist, send AddTimer, then apply the normal start
@@ -743,6 +825,7 @@ static void deinit(void) {
   persist_all();
   rearm_wakeup();   // ensure the closed-app wakeup reflects final state
   if (s_confirm_window) { window_destroy(s_confirm_window); }
+  if (s_del_window) { window_destroy(s_del_window); }
   window_destroy(s_window);
 }
 
