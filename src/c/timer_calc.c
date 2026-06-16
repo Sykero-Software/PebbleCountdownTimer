@@ -180,7 +180,14 @@ int tc_reconcile(const Timer *cur, int curN, const Timer *cfg, int cfgN, Timer *
         t.remaining = t.duration;
       }
     }
+    t.custom = false;   // a config-backed position is no longer watch-local (absorbs custom rows)
     out[i] = t;
+  }
+  // Preserve watch-created (custom) rows that sit beyond the config length, so an
+  // on-watch "Save as new" timer is not dropped before the phone config grows to
+  // include it. Non-custom trailing rows are dropped as before.
+  for (int i = cfgN; i < curN && n < MAX_TIMERS; i++) {
+    if (cur[i].custom) { out[n] = cur[i]; n++; }
   }
   return n;
 }

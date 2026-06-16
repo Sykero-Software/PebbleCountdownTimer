@@ -106,6 +106,31 @@ int main(void) {
   assert(rn == 2);
   assert(outr[0].state == TS_RUNNING && outr[0].end_time == 9999 && outr[0].last_used == 42);
   assert(outr[1].state == TS_IDLE && outr[1].duration == 60 && strcmp(outr[1].name, "New") == 0);
+  // a trailing custom row (cur beyond cfgN) is preserved, appended after config
+  Timer cur2[2]; memset(cur2, 0, sizeof(cur2));
+  strcpy(cur2[0].name, "Egg"); cur2[0].duration = 300; cur2[0].state = TS_IDLE; cur2[0].remaining = 300;
+  cur2[1].duration = 600; cur2[1].state = TS_RUNNING; cur2[1].end_time = 7777; cur2[1].custom = true;
+  Timer cfg2[1]; memset(cfg2, 0, sizeof(cfg2));
+  strcpy(cfg2[0].name, "Egg"); cfg2[0].duration = 300; cfg2[0].state = TS_IDLE; cfg2[0].remaining = 300;
+  Timer outr2[MAX_TIMERS];
+  int rn2 = tc_reconcile(cur2, 2, cfg2, 1, outr2);
+  assert(rn2 == 2);
+  assert(outr2[1].state == TS_RUNNING && outr2[1].end_time == 7777 && outr2[1].custom == true);
+
+  // a trailing NON-custom row is still dropped (classic behavior)
+  Timer cur3[2]; memset(cur3, 0, sizeof(cur3));
+  strcpy(cur3[0].name, "Egg"); cur3[0].duration = 300;
+  cur3[1].duration = 600; cur3[1].state = TS_RUNNING; cur3[1].custom = false;
+  int rn3 = tc_reconcile(cur3, 2, cfg2, 1, outr2);
+  assert(rn3 == 1);
+
+  // once the config grows to include the custom row's position, the flag clears (absorbed)
+  Timer cfg4[2]; memset(cfg4, 0, sizeof(cfg4));
+  strcpy(cfg4[0].name, "Egg"); cfg4[0].duration = 300; cfg4[0].remaining = 300;
+  cfg4[1].duration = 600; cfg4[1].remaining = 600;   // unnamed, matches the custom row's duration
+  int rn4 = tc_reconcile(cur2, 2, cfg4, 2, outr2);
+  assert(rn4 == 2);
+  assert(outr2[1].state == TS_RUNNING && outr2[1].end_time == 7777 && outr2[1].custom == false);
 
   // --- tc_add: running extends end_time; paused grows remaining; stamps last_used ---
   Timer a; memset(&a, 0, sizeof(a)); a.duration = 300;
