@@ -411,21 +411,33 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   }
   int idx = s_order[ci->row];
   Timer *t = &s_timers[idx];
-  // Tint non-selected rows by state (color displays only). The selected row keeps
-  // MenuLayer's standard highlight (black bg / white text) so the cursor is obvious.
+  // Tint each row by state so running/paused/done stand out at a glance (color
+  // displays only; b&w falls back to the standard white/black look). The selected
+  // row uses a DARK shade of the same hue + white text so it still reads as the
+  // cursor AND keeps its state colour; idle selected stays the plain black highlight.
   MenuIndex sel = menu_layer_get_selected_index(s_menu);
-  if (menu_index_compare(&sel, ci) != 0) {
-    GColor bg = GColorWhite;
+  bool selected = (menu_index_compare(&sel, ci) == 0);
+  GColor bg, fg;
+  if (selected) {
+    fg = GColorWhite;
     switch (t->state) {
-      case TS_RUNNING: bg = PBL_IF_COLOR_ELSE(GColorMintGreen, GColorWhite); break;
-      case TS_PAUSED:  bg = PBL_IF_COLOR_ELSE(GColorPastelYellow, GColorWhite); break;
-      case TS_DONE:    bg = PBL_IF_COLOR_ELSE(GColorMelon, GColorWhite); break;
-      default:         break;   // TS_IDLE -> white
+      case TS_RUNNING: bg = PBL_IF_COLOR_ELSE(GColorDarkGreen, GColorBlack); break;
+      case TS_PAUSED:  bg = PBL_IF_COLOR_ELSE(GColorArmyGreen, GColorBlack); break;
+      case TS_DONE:    bg = PBL_IF_COLOR_ELSE(GColorDarkCandyAppleRed, GColorBlack); break;
+      default:         bg = GColorBlack; break;   // TS_IDLE -> standard highlight
     }
-    graphics_context_set_fill_color(gctx, bg);
-    graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
-    graphics_context_set_text_color(gctx, GColorBlack);
+  } else {
+    fg = GColorBlack;
+    switch (t->state) {
+      case TS_RUNNING: bg = PBL_IF_COLOR_ELSE(GColorMediumSpringGreen, GColorWhite); break;
+      case TS_PAUSED:  bg = PBL_IF_COLOR_ELSE(GColorYellow, GColorWhite); break;
+      case TS_DONE:    bg = PBL_IF_COLOR_ELSE(GColorSunsetOrange, GColorWhite); break;
+      default:         bg = GColorWhite; break;   // TS_IDLE
+    }
   }
+  graphics_context_set_fill_color(gctx, bg);
+  graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
+  graphics_context_set_text_color(gctx, fg);
   char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
   if (t->name[0]) {
     char sub[40]; snprintf(sub, sizeof(sub), "%s  %s", rem, state_label(t->state));
