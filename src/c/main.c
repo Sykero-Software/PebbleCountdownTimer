@@ -49,6 +49,14 @@ static bool s_confirm_named;
 
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
+// Close the app to the WATCHFACE (not the launcher). exit_reason_set tells
+// PebbleOS this was a completed action, so it returns to the watchface; without
+// it window_stack_pop_all lands back wherever the app was launched from.
+static void close_to_watchface(void) {
+  exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);
+  window_stack_pop_all(true);
+}
+
 // ---- wakeup: keep exactly ONE armed for the soonest running end_time ----
 static void rearm_wakeup(void) {
   int32_t old = store_load_wakeup_id();
@@ -131,7 +139,7 @@ static void alarm_stop(ClickRecognizerRef rec, void *ctx) {
     tc_reset(&s_timers[s_alarm_idx], now_s());
     persist_all(); rearm_wakeup(); reload_ui();
   }
-  window_stack_pop_all(true);
+  close_to_watchface();
 }
 
 static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
@@ -345,7 +353,7 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   } else if (ci->row == 1) {          // Stop (reset) -- running/paused
     tc_reset(t, now_s());
     persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
-    if (s_auto_return) { window_stack_pop_all(true); }
+    if (s_auto_return) { close_to_watchface(); }
     else { window_stack_remove(s_detail_window, true); }
   } else {                            // row 2/3: +1 / -1 min
     int32_t secs = (ci->row == 2) ? 60 : -60;
@@ -459,7 +467,7 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
 
 static void confirm_timer_cb(void *data) {
   s_confirm_timer = NULL;
-  window_stack_pop_all(true);   // close the app -> watchface
+  close_to_watchface();   // -> watchface (with exit reason)
 }
 
 static void confirm_update_proc(Layer *layer, GContext *gctx) {
