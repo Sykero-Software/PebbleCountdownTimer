@@ -78,21 +78,26 @@ bool tc_soonest_end(const Timer *t, int count, int64_t *out) {
 }
 
 // Comparison key for a timer under `mode`. Returns a 64-bit value; the sort puts
-// HIGHER keys first, so we negate where the mode wants ascending order.
-static int64_t order_key(const Timer *t, SortMode mode, int64_t now) {
-  if (mode == SORT_SHORTEST) { return -(int64_t)tc_remaining_now(t, now); } // asc -> negate
-  if (mode == SORT_LONGEST)  { return  (int64_t)tc_remaining_now(t, now); } // desc
-  return t->last_used;                                                       // MRU: desc
+// HIGHER keys first, so we negate where the mode wants ascending order. When
+// running_first is set, RUNNING timers get a large bias so they sort above all
+// non-running timers regardless of mode.
+static int64_t order_key(const Timer *t, SortMode mode, int64_t now, bool running_first) {
+  int64_t base;
+  if (mode == SORT_SHORTEST) { base = -(int64_t)tc_remaining_now(t, now); } // asc -> negate
+  else if (mode == SORT_LONGEST)  { base =  (int64_t)tc_remaining_now(t, now); } // desc
+  else { base = t->last_used; }                                              // MRU: desc
+  if (running_first && t->state == TS_RUNNING) { base += (1LL << 40); }
+  return base;
 }
 
-void tc_display_order(const Timer *t, int count, SortMode mode, int64_t now, int *order) {
+void tc_display_order(const Timer *t, int count, SortMode mode, int64_t now, int *order, bool running_first) {
   for (int i = 0; i < count; i++) { order[i] = i; }
   // stable insertion sort: higher order_key first, ties keep ascending index
   for (int i = 1; i < count; i++) {
     int key = order[i];
-    int64_t kv = order_key(&t[key], mode, now);
+    int64_t kv = order_key(&t[key], mode, now, running_first);
     int j = i - 1;
-    while (j >= 0 && order_key(&t[order[j]], mode, now) < kv) {
+    while (j >= 0 && order_key(&t[order[j]], mode, now, running_first) < kv) {
       order[j + 1] = order[j];
       j--;
     }

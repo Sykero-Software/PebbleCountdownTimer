@@ -65,7 +65,7 @@ int main(void) {
   Timer d[3]; memset(d, 0, sizeof(d));
   d[0].last_used = 10; d[1].last_used = 0; d[2].last_used = 30;
   int order[3];
-  tc_display_order(d, 3, SORT_MRU, 0, order);
+  tc_display_order(d, 3, SORT_MRU, 0, order, false);
   assert(order[0] == 2 && order[1] == 0 && order[2] == 1);
 
   // --- display_order: SORT_SHORTEST / SORT_LONGEST by remaining-at-now ---
@@ -73,10 +73,24 @@ int main(void) {
   e[0].state = TS_RUNNING; e[0].end_time = 1300;  // 300s left at now=1000
   e[1].state = TS_PAUSED;  e[1].remaining = 50;   // 50s
   e[2].state = TS_IDLE;    e[2].remaining = 120;  // 120s
-  tc_display_order(e, 3, SORT_SHORTEST, 1000, order);
+  tc_display_order(e, 3, SORT_SHORTEST, 1000, order, false);
   assert(order[0] == 1 && order[1] == 2 && order[2] == 0);  // 50, 120, 300
-  tc_display_order(e, 3, SORT_LONGEST, 1000, order);
+  tc_display_order(e, 3, SORT_LONGEST, 1000, order, false);
   assert(order[0] == 0 && order[1] == 2 && order[2] == 1);  // 300, 120, 50
+
+  // --- display_order: running_first floats RUNNING above non-running ---
+  Timer rf[4]; memset(rf, 0, sizeof(rf));
+  rf[0].state = TS_IDLE;    rf[0].last_used = 100;                         // non-running
+  rf[1].state = TS_RUNNING; rf[1].end_time = 5000; rf[1].last_used = 10;   // running
+  rf[2].state = TS_PAUSED;  rf[2].last_used = 200;                         // non-running
+  rf[3].state = TS_RUNNING; rf[3].end_time = 6000; rf[3].last_used = 50;   // running
+  int rford[4];
+  // ON, MRU: running group first by last_used desc (3,1), then non-running (2,0)
+  tc_display_order(rf, 4, SORT_MRU, 0, rford, true);
+  assert(rford[0] == 3 && rford[1] == 1 && rford[2] == 2 && rford[3] == 0);
+  // OFF: pure MRU desc -> 2(200), 0(100), 3(50), 1(10)
+  tc_display_order(rf, 4, SORT_MRU, 0, rford, false);
+  assert(rford[0] == 2 && rford[1] == 0 && rford[2] == 3 && rford[3] == 1);
 
   // --- reconcile: unchanged row keeps RUNNING state; new row IDLE ---
   Timer cur[1]; memset(cur, 0, sizeof(cur));
