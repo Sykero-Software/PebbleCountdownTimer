@@ -30,3 +30,7 @@ src/c/timer_calc.c -o /tmp/t && /tmp/t`). Run the phone-side tests with `npm tes
 ## License
 
 GPL-3.0-only.
+
+## Support
+
+Questions, feedback or bug reports: <pebble.trackworktime@sykero.fi>
