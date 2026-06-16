@@ -28,6 +28,8 @@ const config = [
         ] },
       { type: 'toggle', messageKey: 'AutoReturn',
         label: 'Return to watchface after starting or stopping a timer', defaultValue: true },
+      { type: 'toggle', messageKey: 'RunningFirst',
+        label: 'Show running timers at the top', defaultValue: true },
     ],
   },
   { type: 'submit', defaultValue: 'Save' },

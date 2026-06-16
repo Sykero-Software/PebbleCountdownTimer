@@ -61,3 +61,12 @@ bool store_load_autoreturn(void) {
 void store_save_autoreturn(bool on) {
   persist_write_bool(PERSIST_KEY_AUTORETURN, on);
 }
+
+bool store_load_runningfirst(void) {
+  if (!persist_exists(PERSIST_KEY_RUNNINGFIRST)) { return true; }   // default ON
+  return persist_read_bool(PERSIST_KEY_RUNNINGFIRST);
+}
+
+void store_save_runningfirst(bool on) {
+  persist_write_bool(PERSIST_KEY_RUNNINGFIRST, on);
+}
