@@ -524,6 +524,14 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   }
 }
 
+// Long SELECT opens the detail window for ANY timer (short SELECT still starts an
+// idle timer directly). This is how an idle/done timer reaches the +/- adjust and
+// the "Save as new & start" action.
+static void ml_select_long(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  if (s_count == 0) { return; }
+  open_detail_window(s_order[ci->row]);
+}
+
 // ---- AppMessage inbox: a TimerConfig string + SortOrder int -> reconcile ----
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *sort = dict_find(iter, MESSAGE_KEY_SortOrder);
@@ -590,6 +598,7 @@ static void window_load(Window *w) {
     .get_cell_height = ml_cell_height,
     .draw_row = ml_draw_row,
     .select_click = ml_select,
+    .select_long_click = ml_select_long,
   });
   menu_layer_set_click_config_onto_window(s_menu, w);
   layer_add_child(root, menu_layer_get_layer(s_menu));
