@@ -275,15 +275,16 @@ static void select_timer_row(int idx) {
   }
 }
 
-// true when the detail window's timer can take +N (it is running or paused).
-static bool detail_addable(void) {
+// Startable = the detail window's timer can be started fresh (idle or done); these
+// states offer "Save as new & start" instead of "Stop".
+static bool detail_startable(void) {
   if (s_detail_idx < 0 || s_detail_idx >= s_count) { return false; }
   TimerState st = s_timers[s_detail_idx].state;
-  return st == TS_RUNNING || st == TS_PAUSED;
+  return st == TS_IDLE || st == TS_DONE;
 }
 
 static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
-  return detail_addable() ? 4 : 2;   // Pause/Start, Stop [, +1, -1]
+  return 4;   // row0 primary, row1 secondary, +1 min, -1 min
 }
 static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
 static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
@@ -307,10 +308,10 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
   }
 }
 
-static const char *dl_row_label(int row, bool running) {
+static const char *dl_row_label(int row, TimerState st) {
   switch (row) {
-    case 0: return running ? "Pause" : "Start";
-    case 1: return "Stop";
+    case 0: return (st == TS_RUNNING) ? "Pause" : "Start";   // paused/idle/done -> Start(=resume/start)
+    case 1: return (st == TS_IDLE || st == TS_DONE) ? "Save as new & start" : "Stop";
     case 2: return "+1 min";
     case 3: return "-1 min";
     default: return "";
@@ -318,35 +319,45 @@ static const char *dl_row_label(int row, bool running) {
 }
 
 static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
-  bool running = (s_detail_idx >= 0 && s_detail_idx < s_count
-                  && s_timers[s_detail_idx].state == TS_RUNNING);
+  TimerState st = (s_detail_idx >= 0 && s_detail_idx < s_count)
+                  ? s_timers[s_detail_idx].state : TS_IDLE;
   GRect b = layer_get_bounds(cell);
-  // MenuLayer pre-sets the text color (normal=black, highlight=white) and fills the
-  // cell background before this callback, so just draw the label.
-  graphics_draw_text(gctx, dl_row_label(ci->row, running),
+  graphics_draw_text(gctx, dl_row_label(ci->row, st),
     fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
     GRect(6, 1, b.size.w - 12, b.size.h - 1),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
+static void save_as_new_and_start(int32_t secs);  // defined in Task 9
+static void save_as_new_and_start(int32_t secs) { (void)secs; }  // temporary stub
+
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   int idx = s_detail_idx;
   if (idx < 0 || idx >= s_count) { return; }
   Timer *t = &s_timers[idx];
-  if (ci->row == 0) {                 // Pause / Start -> keep window open
+  if (ci->row == 0) {                 // Pause / Start(resume/start) -> keep window open
     if (t->state == TS_RUNNING) { tc_pause(t, now_s()); }
     else { tc_start(t, now_s()); }
     persist_all(); rearm_wakeup(); ensure_ticking();
     reload_ui(); menu_layer_reload_data(s_detail_menu);
-  } else if (ci->row == 1) {          // Stop (reset)
+  } else if (ci->row == 1 && detail_startable()) {   // Save as new & start
+    int32_t rem = tc_remaining_now(t, now_s());
+    save_as_new_and_start(rem >= 1 ? rem : t->duration);
+  } else if (ci->row == 1) {          // Stop (reset) -- running/paused
     tc_reset(t, now_s());
     persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
-    // AutoReturn on -> close the app (-> watchface); else just pop back to the list.
     if (s_auto_return) { window_stack_pop_all(true); }
     else { window_stack_remove(s_detail_window, true); }
-  } else if (detail_addable()) {      // +1 / -1 min -> keep window open
+  } else {                            // row 2/3: +1 / -1 min
     int32_t secs = (ci->row == 2) ? 60 : -60;
-    tc_add(t, secs, now_s());
+    if (t->state == TS_RUNNING || t->state == TS_PAUSED) {
+      tc_add(t, secs, now_s());
+    } else {                          // idle/done: adjust `remaining` (60s floor), keep template
+      int32_t r = t->remaining + secs;
+      if (r < 60) { r = 60; }
+      t->remaining = r;
+      t->last_used = now_s();
+    }
     persist_all(); rearm_wakeup(); ensure_ticking();
     reload_ui(); menu_layer_reload_data(s_detail_menu);
   }
