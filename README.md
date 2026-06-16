@@ -1,7 +1,7 @@
 # PebbleCountdownTimer
 
 **Countdown timer** — a simple multi-timer watchapp for Pebble (C + Pebble SDK),
-part of the [Sykerö](https://github.com/Sykero-Software) pebble-timetracking monorepo.
+from [Sykerö Software](https://github.com/Sykero-Software).
 
 Configure a list of named countdown timers (up to 16), each with its own duration,
 entirely from the phone (a Clay config page that opens in the Core Devices app).
