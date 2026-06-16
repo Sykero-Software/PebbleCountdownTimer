@@ -39,6 +39,14 @@ static Window *s_detail_window;
 static MenuLayer *s_detail_menu;
 static int s_detail_idx = -1;   // config index the detail window is showing
 
+// ---- transient "Started" confirmation shown ~1.1s before auto-return closes the app ----
+static Window  *s_confirm_window;
+static Layer   *s_confirm_layer;
+static AppTimer *s_confirm_timer;
+static char s_confirm_name[NAME_LEN + 1];
+static char s_confirm_time[16];
+static bool s_confirm_named;
+
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
 // ---- wakeup: keep exactly ONE armed for the soonest running end_time ----
@@ -267,14 +275,6 @@ static void select_timer_row(int idx) {
   }
 }
 
-// Config option: leave the app (-> watchface) after a timer is started. The wakeup
-// keeps a closed app's timer firing, so the alarm still triggers. ONLY used by the
-// idle one-tap start in ml_select; the detail window never auto-returns (the user may
-// press +1 min several times).
-static void return_to_watchface(void) {
-  if (s_auto_return) { window_stack_pop_all(true); }
-}
-
 // true when the detail window's timer can take +N (it is running or paused).
 static bool detail_addable(void) {
   if (s_detail_idx < 0 || s_detail_idx >= s_count) { return false; }
@@ -435,6 +435,68 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   }
 }
 
+static void confirm_timer_cb(void *data) {
+  s_confirm_timer = NULL;
+  window_stack_pop_all(true);   // close the app -> watchface
+}
+
+static void confirm_update_proc(Layer *layer, GContext *gctx) {
+  GRect b = layer_get_bounds(layer);
+  int cx = b.size.w / 2;
+  int cy = b.size.h / 2;
+  // checkmark (two thick strokes), black on the green/white window background
+  graphics_context_set_stroke_color(gctx, GColorBlack);
+  graphics_context_set_stroke_width(gctx, 4);
+  graphics_draw_line(gctx, GPoint(cx - 18, cy - 34), GPoint(cx - 6, cy - 22));
+  graphics_draw_line(gctx, GPoint(cx - 6, cy - 22), GPoint(cx + 20, cy - 48));
+  graphics_context_set_text_color(gctx, GColorBlack);
+  // name (or the time, if unnamed)
+  graphics_draw_text(gctx, s_confirm_name, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+    GRect(4, cy - 14, b.size.w - 8, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  // duration (only when named, to avoid showing the time twice)
+  if (s_confirm_named) {
+    graphics_draw_text(gctx, s_confirm_time, fonts_get_system_font(FONT_KEY_GOTHIC_18),
+      GRect(4, cy + 16, b.size.w - 8, 22), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  }
+  // "Started"
+  graphics_draw_text(gctx, "Started", fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+    GRect(4, cy + 38, b.size.w - 8, 22), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+}
+
+static void confirm_window_load(Window *w) {
+  Layer *root = window_get_root_layer(w);
+  s_confirm_layer = layer_create(layer_get_bounds(root));
+  layer_set_update_proc(s_confirm_layer, confirm_update_proc);
+  layer_add_child(root, s_confirm_layer);
+}
+
+static void confirm_window_unload(Window *w) {
+  if (s_confirm_timer) { app_timer_cancel(s_confirm_timer); s_confirm_timer = NULL; }
+  if (s_confirm_layer) { layer_destroy(s_confirm_layer); s_confirm_layer = NULL; }
+}
+
+// Flash a "Started" screen for ~1.1s, then pop the whole stack (-> watchface).
+// Only called on the idle one-tap start when AutoReturn is on.
+static void show_start_confirmation(int idx) {
+  Timer *t = &s_timers[idx];
+  tc_format_remaining(s_confirm_time, sizeof(s_confirm_time), tc_remaining_now(t, now_s()));
+  s_confirm_named = (t->name[0] != 0);
+  if (s_confirm_named) {
+    strncpy(s_confirm_name, t->name, sizeof(s_confirm_name));
+  } else {
+    strncpy(s_confirm_name, s_confirm_time, sizeof(s_confirm_name));
+  }
+  s_confirm_name[sizeof(s_confirm_name) - 1] = 0;
+  if (!s_confirm_window) {
+    s_confirm_window = window_create();
+    window_set_background_color(s_confirm_window, PBL_IF_COLOR_ELSE(GColorMintGreen, GColorWhite));
+    window_set_window_handlers(s_confirm_window,
+      (WindowHandlers){ .load = confirm_window_load, .unload = confirm_window_unload });
+  }
+  window_stack_push(s_confirm_window, true);
+  s_confirm_timer = app_timer_register(1100, confirm_timer_cb, NULL);
+}
+
 static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   if (s_count == 0) { return; }
   int idx = s_order[ci->row];
@@ -443,7 +505,8 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     tc_start(&s_timers[idx], now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
     select_timer_row(idx);
-    return_to_watchface();
+    if (s_auto_return) { show_start_confirmation(idx); }   // flash, then pop to watchface
+    return;
   } else {
     open_detail_window(idx);
   }
@@ -563,6 +626,7 @@ static void deinit(void) {
   if (s_tick) { app_timer_cancel(s_tick); }
   persist_all();
   rearm_wakeup();   // ensure the closed-app wakeup reflects final state
+  if (s_confirm_window) { window_destroy(s_confirm_window); }
   window_destroy(s_window);
 }
 
