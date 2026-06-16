@@ -4,15 +4,19 @@
 from [Sykerö Software](https://github.com/Sykero-Software).
 
 Configure a list of named countdown timers (up to 16), each with its own duration,
-entirely from the phone (a Clay config page that opens in the Core Devices app).
-On the watch you see the list and can **start / pause / reset** each timer via a
-per-row action menu. Multiple timers run simultaneously; each vibrates when it
-reaches zero even when the app is closed (a single Pebble Wakeup is kept armed for
-the soonest-expiring timer). The list can be sorted by most-recently-used,
-shortest remaining, or longest remaining.
+from the phone (a Clay config page that opens in the Core Devices app). On the
+watch you see the list and, per timer, can **start / pause / resume / stop**,
+**adjust the duration** (±1 min), and **delete** it — via a per-row detail menu
+(short SELECT starts an idle timer; long SELECT opens the detail menu in any
+state). You can also **create a one-off timer directly on the watch** ("Save as
+new & start" from a tuned idle row), no phone needed. Multiple timers run
+simultaneously; each vibrates when it reaches zero even when the app is closed (a
+single Pebble Wakeup is kept armed for the soonest-expiring timer). The list can be
+sorted by most-recently-used, shortest remaining, or longest remaining.
 
-Configuration is phone-side only — the watch never creates or edits timers, just
-controls the configured ones.
+The phone config stays the single source of truth for the saved list — naming and
+reordering are phone-side — but timers created, adjusted or deleted on the watch
+are synced back to it.
 
 ## Build
 
