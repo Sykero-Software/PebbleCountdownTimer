@@ -20,6 +20,7 @@ typedef struct {
   int64_t end_time;     // epoch secs; valid when RUNNING
   int32_t remaining;    // secs left; valid when IDLE/PAUSED/DONE
   int64_t last_used;    // epoch secs of last user action; drives list order
+  bool custom;          // true = created on the watch; preserved across config reconcile until absorbed
 } Timer;
 
 // Parse the TimerConfig string into config-only timers (state IDLE, remaining=

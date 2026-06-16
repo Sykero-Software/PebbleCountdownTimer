@@ -11,7 +11,7 @@
 #define PERSIST_KEY_AUTORETURN 5
 #define PERSIST_KEY_RUNNINGFIRST 6
 #define PERSIST_KEY_TIMER_BASE 100   // timer i -> key 100+i (one Timer per key; 256B/key cap)
-#define STORE_SCHEMA 1
+#define STORE_SCHEMA 2
 
 // Loads timers into out (capacity MAX_TIMERS); returns count, or 0 if none/old schema.
 int store_load(Timer *out);

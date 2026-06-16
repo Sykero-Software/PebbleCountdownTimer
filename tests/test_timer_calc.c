@@ -17,6 +17,8 @@ int main(void) {
   // skip zero/invalid durations; cap at MAX_TIMERS
   assert(tc_parse_config("a\x1f""0\x1e""b\x1f""60", t, MAX_TIMERS) == 1);
   assert(strcmp(t[0].name, "b") == 0);
+  // parsed timers are config-backed, never custom
+  assert(t[0].custom == false);
 
   // --- tc_format_remaining ---
   char b[16];
