@@ -16,11 +16,12 @@ clay.registerComponent(timerListComponent);
 Pebble.addEventListener('appmessage', (e: any) => {
   const p = e && e.payload;
   if (p && typeof p.AddTimer === 'number') {
-    appendCustomTimer(
+    const saved = appendCustomTimer(
       (k) => window.localStorage.getItem(k),
       (k, v) => window.localStorage.setItem(k, v),
       p.AddTimer);
-    console.log('AddTimer saved: ' + p.AddTimer + 's');
+    console.log(saved ? 'AddTimer saved: ' + p.AddTimer + 's'
+      : 'AddTimer rejected (invalid or full): ' + p.AddTimer);
     return;   // no echo — the watch already holds the running timer locally as custom
   }
   const dict = resendDict((k) => window.localStorage.getItem(k));
