@@ -577,23 +577,28 @@ static void confirm_update_proc(Layer *layer, GContext *gctx) {
   GRect b = layer_get_bounds(layer);
   int cx = b.size.w / 2;
   int cy = b.size.h / 2;
-  // checkmark (two thick strokes), black on the green/white window background
-  graphics_context_set_stroke_color(gctx, GColorBlack);
-  graphics_context_set_stroke_width(gctx, 4);
-  graphics_draw_line(gctx, GPoint(cx - 18, cy - 34), GPoint(cx - 6, cy - 22));
-  graphics_draw_line(gctx, GPoint(cx - 6, cy - 22), GPoint(cx + 20, cy - 48));
-  graphics_context_set_text_color(gctx, GColorBlack);
-  // name (or the time, if unnamed)
-  graphics_draw_text(gctx, s_confirm_name, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-    GRect(4, cy - 14, b.size.w - 8, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  // duration (only when named, to avoid showing the time twice)
+  // white foreground on the saturated-green window (black on the b&w fallback),
+  // mirroring the alarm screen's white-on-red look
+  GColor fg = PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack);
+  // checkmark (two thick strokes)
+  graphics_context_set_stroke_color(gctx, fg);
+  graphics_context_set_stroke_width(gctx, 6);
+  graphics_draw_line(gctx, GPoint(cx - 24, cy - 42), GPoint(cx - 8, cy - 26));
+  graphics_draw_line(gctx, GPoint(cx - 8, cy - 26), GPoint(cx + 26, cy - 60));
+  graphics_context_set_text_color(gctx, fg);
+  // name (or the time, if unnamed) — large
+  graphics_draw_text(gctx, s_confirm_name, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+    GRect(2, cy - 18, b.size.w - 4, 36), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   if (s_confirm_named) {
-    graphics_draw_text(gctx, s_confirm_time, fonts_get_system_font(FONT_KEY_GOTHIC_18),
-      GRect(4, cy + 16, b.size.w - 8, 22), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    // duration (only when named, to avoid showing the time twice) — large + bold
+    graphics_draw_text(gctx, s_confirm_time, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+      GRect(2, cy + 20, b.size.w - 4, 34), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_draw_text(gctx, "Started", fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(2, cy + 56, b.size.w - 4, 30), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  } else {
+    graphics_draw_text(gctx, "Started", fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(2, cy + 22, b.size.w - 4, 30), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
-  // "Started"
-  graphics_draw_text(gctx, "Started", fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-    GRect(4, cy + 38, b.size.w - 8, 22), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 }
 
 static void confirm_window_load(Window *w) {
@@ -622,7 +627,7 @@ static void show_start_confirmation(int idx) {
   s_confirm_name[sizeof(s_confirm_name) - 1] = 0;
   if (!s_confirm_window) {
     s_confirm_window = window_create();
-    window_set_background_color(s_confirm_window, PBL_IF_COLOR_ELSE(GColorMintGreen, GColorWhite));
+    window_set_background_color(s_confirm_window, PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorWhite));
     window_set_window_handlers(s_confirm_window,
       (WindowHandlers){ .load = confirm_window_load, .unload = confirm_window_unload });
   }
@@ -818,6 +823,12 @@ static void init(void) {
 
   // Launched by a wakeup because a timer finished -> show the alarm over the list.
   if (by_wakeup && fired) { trigger_alarm(s_last_fired_idx, fired); }
+
+#ifdef SCREENSHOT_FIXTURES
+  // Preview the transient "Started" confirmation; cancel its auto-close so it stays up.
+  show_start_confirmation(0);
+  if (s_confirm_timer) { app_timer_cancel(s_confirm_timer); s_confirm_timer = NULL; }
+#endif
 }
 
 static void deinit(void) {
