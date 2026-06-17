@@ -514,7 +514,11 @@ static void open_detail_window(int timer_idx) {
 static uint16_t ml_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
   return s_count == 0 ? 1 : s_count;
 }
-static int16_t ml_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 32; }
+// Timer rows are single-line (32px); the empty-state row uses menu_cell_basic_draw
+// (title + subtitle), which needs the taller 44px to render both lines without clipping.
+static int16_t ml_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  return s_count == 0 ? 44 : 32;
+}
 
 static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
   if (s_count == 0) {
