@@ -327,8 +327,8 @@ static uint16_t dl_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
   dl_rebuild_actions();
   return (uint16_t)s_detail_act_count;
 }
-static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 28; }
-static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 26; }
+static int16_t dl_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 34; }
+static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { return 32; }
 
 // Header: timer name (left) + live remaining time (right); time only if unnamed.
 static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, void *ctx) {
@@ -336,15 +336,15 @@ static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, 
   Timer *t = &s_timers[s_detail_idx];
   char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
   GRect b = layer_get_bounds(cell);
-  GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   graphics_context_set_text_color(gctx, GColorBlack);
   if (t->name[0]) {
-    graphics_draw_text(gctx, t->name, f, GRect(4, 2, b.size.w - 80, 22),
+    graphics_draw_text(gctx, t->name, f, GRect(4, 3, b.size.w - 92, 26),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-    graphics_draw_text(gctx, rem, f, GRect(4, 2, b.size.w - 8, 22),
+    graphics_draw_text(gctx, rem, f, GRect(4, 3, b.size.w - 8, 26),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
   } else {
-    graphics_draw_text(gctx, rem, f, GRect(4, 2, b.size.w - 8, 22),
+    graphics_draw_text(gctx, rem, f, GRect(4, 3, b.size.w - 8, 26),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 }
@@ -353,8 +353,8 @@ static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   if (ci->row >= s_detail_act_count) { return; }
   GRect b = layer_get_bounds(cell);
   graphics_draw_text(gctx, dl_action_label(s_detail_acts[ci->row]),
-    fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-    GRect(6, 1, b.size.w - 12, b.size.h - 1),
+    fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+    GRect(6, (b.size.h - 26) / 2, b.size.w - 12, 26),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
