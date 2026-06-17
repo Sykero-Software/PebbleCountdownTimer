@@ -551,18 +551,25 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
   graphics_context_set_text_color(gctx, fg);
   GRect b = layer_get_bounds(cell);
-  // Single line: fixed-width time first (bold, fixed HH:MM:SS so a column of times
-  // aligns + is easy to compare), then the description. State is conveyed by the
-  // row's background tint. The fixed format always renders the same pixel width, so
-  // the name starts at a constant x and rows line up.
+  // Single line: fixed-width HH:MM:SS time first (bold) so the column aligns and is
+  // easy to compare, then the description. State is conveyed by the row tint. On
+  // smaller (144px) displays use a smaller font so the description fits.
+  bool small = (b.size.w <= 144);
+  GFont tf = fonts_get_system_font(small ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_24_BOLD);
+  GFont nf = fonts_get_system_font(small ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_24);
+  int th = small ? 22 : 28;
+  int ty = (b.size.h - th) / 2;
   char rem[16]; tc_format_fixed(rem, sizeof(rem), tc_remaining_now(t, now_s()));
-  const int time_w = 96;
-  int ty = (b.size.h - 28) / 2;
-  graphics_draw_text(gctx, rem, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-    GRect(4, ty, time_w, 28), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  graphics_draw_text(gctx, rem, tf, GRect(4, ty, b.size.w - 8, th),
+    GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   if (t->name[0]) {
-    graphics_draw_text(gctx, t->name, fonts_get_system_font(FONT_KEY_GOTHIC_24),
-      GRect(4 + time_w, ty, b.size.w - 8 - time_w, 28),
+    // Start the description just after the time text (the fixed format renders a
+    // constant width) with a small gap — much tighter than the old 96px column.
+    GSize tw = graphics_text_layout_get_content_size(rem, tf,
+      GRect(0, 0, b.size.w, th), GTextOverflowModeFill, GTextAlignmentLeft);
+    int name_x = 4 + tw.w + 8;
+    graphics_draw_text(gctx, t->name, nf,
+      GRect(name_x, ty, b.size.w - 4 - name_x, th),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   }
 }
