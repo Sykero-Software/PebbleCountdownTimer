@@ -56,6 +56,14 @@ void tc_format_remaining(char *buf, size_t n, int32_t secs) {
   else { snprintf(buf, n, "%d:%02d", m, s); }
 }
 
+void tc_format_fixed(char *buf, size_t n, int32_t secs) {
+  if (secs < 0) { secs = 0; }
+  int h = secs / 3600;
+  int m = (secs % 3600) / 60;
+  int s = secs % 60;
+  snprintf(buf, n, "%02d:%02d:%02d", h, m, s);
+}
+
 int32_t tc_remaining_now(const Timer *t, int64_t now) {
   if (t->state == TS_RUNNING) {
     int64_t r = t->end_time - now;

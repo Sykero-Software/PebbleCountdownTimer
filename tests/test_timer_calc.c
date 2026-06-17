@@ -28,6 +28,13 @@ int main(void) {
   tc_format_remaining(b, sizeof(b), 3600);  assert(strcmp(b, "1:00:00") == 0);
   tc_format_remaining(b, sizeof(b), 3725);  assert(strcmp(b, "1:02:05") == 0);
 
+  // --- tc_format_fixed (always HH:MM:SS, leading zeros) ---
+  tc_format_fixed(b, sizeof(b), 0);     assert(strcmp(b, "00:00:00") == 0);
+  tc_format_fixed(b, sizeof(b), 5);     assert(strcmp(b, "00:00:05") == 0);
+  tc_format_fixed(b, sizeof(b), 65);    assert(strcmp(b, "00:01:05") == 0);
+  tc_format_fixed(b, sizeof(b), 3725);  assert(strcmp(b, "01:02:05") == 0);
+  tc_format_fixed(b, sizeof(b), -10);   assert(strcmp(b, "00:00:00") == 0);
+
   // --- transitions + remaining_now ---
   Timer x; memset(&x, 0, sizeof(x)); x.duration = 300; x.remaining = 300; x.state = TS_IDLE;
   tc_start(&x, 1000);

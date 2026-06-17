@@ -42,6 +42,10 @@ int tc_parse_config(const char *buf, Timer *out, int max);
 // "M:SS" when < 1h, else "H:MM:SS". Writes into buf (size n).
 void tc_format_remaining(char *buf, size_t n, int32_t secs);
 
+// Fixed-width "HH:MM:SS" (leading zeros, always all fields) so a column of times
+// aligns and is easy to compare at a glance. Writes into buf (size n).
+void tc_format_fixed(char *buf, size_t n, int32_t secs);
+
 // Seconds left to show for a timer at time `now`.
 int32_t tc_remaining_now(const Timer *t, int64_t now);
 

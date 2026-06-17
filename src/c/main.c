@@ -514,16 +514,7 @@ static void open_detail_window(int timer_idx) {
 static uint16_t ml_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
   return s_count == 0 ? 1 : s_count;
 }
-static int16_t ml_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 44; }
-
-static const char *state_label(TimerState st) {
-  switch (st) {
-    case TS_RUNNING: return "Running";
-    case TS_PAUSED:  return "Paused";
-    case TS_DONE:    return "Done";
-    default:         return "";
-  }
-}
+static int16_t ml_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) { return 32; }
 
 static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
   if (s_count == 0) {
@@ -559,12 +550,20 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   graphics_context_set_fill_color(gctx, bg);
   graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
   graphics_context_set_text_color(gctx, fg);
-  char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
+  GRect b = layer_get_bounds(cell);
+  // Single line: fixed-width time first (bold, fixed HH:MM:SS so a column of times
+  // aligns + is easy to compare), then the description. State is conveyed by the
+  // row's background tint. The fixed format always renders the same pixel width, so
+  // the name starts at a constant x and rows line up.
+  char rem[16]; tc_format_fixed(rem, sizeof(rem), tc_remaining_now(t, now_s()));
+  const int time_w = 96;
+  int ty = (b.size.h - 28) / 2;
+  graphics_draw_text(gctx, rem, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+    GRect(4, ty, time_w, 28), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   if (t->name[0]) {
-    char sub[40]; snprintf(sub, sizeof(sub), "%s  %s", rem, state_label(t->state));
-    menu_cell_basic_draw(gctx, cell, t->name, sub, NULL);
-  } else {
-    menu_cell_basic_draw(gctx, cell, rem, state_label(t->state), NULL);
+    graphics_draw_text(gctx, t->name, fonts_get_system_font(FONT_KEY_GOTHIC_24),
+      GRect(4 + time_w, ty, b.size.w - 8 - time_w, 28),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   }
 }
 
@@ -825,9 +824,7 @@ static void init(void) {
   if (by_wakeup && fired) { trigger_alarm(s_last_fired_idx, fired); }
 
 #ifdef SCREENSHOT_FIXTURES
-  // Preview the transient "Started" confirmation; cancel its auto-close so it stays up.
-  show_start_confirmation(0);
-  if (s_confirm_timer) { app_timer_cancel(s_confirm_timer); s_confirm_timer = NULL; }
+  // (list view fixture: 3 seeded timers above show on the list directly)
 #endif
 }
 
