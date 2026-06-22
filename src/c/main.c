@@ -170,6 +170,52 @@ static void alarm_click_config(void *ctx) {
   window_single_click_subscribe(BUTTON_ID_BACK, alarm_add_minute);  // Back = snooze (matches stock)
 }
 
+// Pick the largest title font whose word-wrapped layout fits within box_h (the
+// vertical band between the +1 Min and Stop labels), so a long timer name shrinks
+// instead of overflowing the band and getting clipped mid-line. Returns the chosen
+// font and writes its measured wrapped size into *out. Falls back to the smallest
+// font if even that overflows (still better than the fixed 42px that clipped).
+static GFont alarm_title_font(const char *text, int box_w, int box_h, GSize *out) {
+  static const char *const keys[] = {
+    FONT_KEY_BITHAM_42_BOLD,
+    FONT_KEY_BITHAM_30_BLACK,
+    FONT_KEY_GOTHIC_28_BOLD,
+    FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD,
+  };
+  const GRect probe = GRect(0, 0, box_w, 2000);
+  GFont chosen = NULL;
+  for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    GFont f = fonts_get_system_font(keys[i]);
+    GSize sz = graphics_text_layout_get_content_size(
+        text, f, probe, GTextOverflowModeWordWrap, GTextAlignmentCenter);
+    chosen = f; *out = sz;
+    if (sz.h <= box_h) { break; }   // largest font that fits vertically -> use it
+  }
+  return chosen;
+}
+
+// (Re)compute the title layer's font + frame from the current name. The available
+// band is between the bottom of the +1 Min label (~22% h) and the top of Stop
+// (~78% h); the text is vertically centred within it. Called on load and on
+// in-place refresh (a second timer finishing reuses the open alarm window).
+static void layout_alarm_title(void) {
+  if (!s_alarm_title || !s_alarm_window) { return; }
+  GRect b = layer_get_bounds(window_get_root_layer(s_alarm_window));
+  const int h = b.size.h, wd = b.size.w;
+  const int up_bottom = h * 22 / 100 - 16 + 34;   // bottom edge of the +1 Min label
+  const int down_top  = h * 78 / 100 - 18;         // top edge of the Stop label
+  const int band_top = up_bottom + 2;
+  const int band_h   = down_top - band_top - 2;
+  const int box_w = wd - 4;
+  GSize sz;
+  GFont tf = alarm_title_font(s_alarm_title_buf, box_w, band_h, &sz);
+  const int used_h = sz.h < band_h ? sz.h : band_h;
+  const int title_y = band_top + (band_h - used_h) / 2;
+  text_layer_set_font(s_alarm_title, tf);
+  layer_set_frame(text_layer_get_layer(s_alarm_title), GRect(2, title_y, box_w, used_h + 4));
+}
+
 static void alarm_window_load(Window *w) {
   window_set_background_color(w, GColorRed);
   Layer *root = window_get_root_layer(w);
@@ -194,15 +240,18 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text(s_alarm_lbl_up, "+1 Min");
   layer_add_child(root, text_layer_get_layer(s_alarm_lbl_up));
 
-  // Title — large bold, centred middle band (timer name, or time if unnamed).
+  // Title — large bold, centred in the band between the +1 Min and Stop labels
+  // (timer name, or time if unnamed). The font auto-shrinks for long, wrapping
+  // names so the text never overflows the band and gets clipped mid-line; the
+  // frame + font are computed in layout_alarm_title() (also re-run on refresh).
   s_alarm_title = text_layer_create(GRect(2, h / 2 - 36, wd - 4, 72));
   text_layer_set_background_color(s_alarm_title, GColorClear);
   text_layer_set_text_color(s_alarm_title, GColorWhite);
-  text_layer_set_font(s_alarm_title, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
   text_layer_set_text_alignment(s_alarm_title, GTextAlignmentCenter);
   text_layer_set_overflow_mode(s_alarm_title, GTextOverflowModeWordWrap);
   text_layer_set_text(s_alarm_title, s_alarm_title_buf);
   layer_add_child(root, text_layer_get_layer(s_alarm_title));
+  layout_alarm_title();
 
   // "Stop" — big bold, right-aligned, vertically by the DOWN button (~78% h).
   s_alarm_lbl_down = text_layer_create(GRect(0, h * 78 / 100 - 18, wd - 6, 34));
@@ -248,7 +297,7 @@ static void trigger_alarm(int idx, int count) {
   }
   if (window_stack_get_top_window() == s_alarm_window) {
     // already showing (another timer finished): refresh the text in place
-    if (s_alarm_title) { text_layer_set_text(s_alarm_title, s_alarm_title_buf); }
+    if (s_alarm_title) { text_layer_set_text(s_alarm_title, s_alarm_title_buf); layout_alarm_title(); }
     if (s_alarm_sub) { text_layer_set_text(s_alarm_sub, s_alarm_sub_buf); }
   } else {
     window_stack_push(s_alarm_window, true);
