@@ -362,6 +362,7 @@ static void save_as_new_and_start(int32_t secs);  // defined below
 static void open_delete_confirm(void);             // defined below (delete path)
 static void send_delete_timer(int32_t idx);        // defined below (delete path)
 static void remove_timer_at(int idx);              // defined below (delete path)
+static void show_start_confirmation(int idx);      // defined below (auto-return tail)
 
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   int idx = s_detail_idx;
@@ -374,12 +375,16 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     case DACT_PAUSE:
       tc_pause(t, now_s());
       persist_all(); rearm_wakeup(); ensure_ticking();
-      reload_ui(); menu_layer_reload_data(s_detail_menu);
+      reload_ui();
+      if (s_auto_return) { close_to_watchface(); }   // pause is a state change -> honor AutoReturn
+      else { menu_layer_reload_data(s_detail_menu); }
       break;
     case DACT_START:                    // start (idle/done) or resume (paused), in place
       tc_start(t, now_s());
       persist_all(); rearm_wakeup(); ensure_ticking();
-      reload_ui(); menu_layer_reload_data(s_detail_menu);
+      reload_ui();
+      if (s_auto_return) { show_start_confirmation(idx); }   // flash, then pop to watchface
+      else { menu_layer_reload_data(s_detail_menu); }
       break;
     case DACT_SAVE_START: {             // only present when the time was tuned -> never a dup
       int32_t rem = tc_remaining_now(t, now_s());
