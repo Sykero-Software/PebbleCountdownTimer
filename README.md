@@ -3,6 +3,8 @@
 **Countdown timer** — a simple multi-timer watchapp for Pebble (C + Pebble SDK),
 from [Sykerö Software](https://github.com/Sykero-Software).
 
+**[Install from the Pebble appstore →](https://apps.repebble.com/countdown-timer_c1e3e132dae74bbcaf1a8320)**
+
 Configure a list of named countdown timers (up to 16), each with its own duration,
 from the phone (a Clay config page that opens in the Core Devices app). On the
 watch you see the list and, per timer, can **start / pause / resume / stop**,
@@ -38,3 +40,6 @@ GPL-3.0-only.
 ## Support
 
 Questions, feedback or bug reports: <pebble.trackworktime@sykero.fi>
+
+Browse all Sykerö Software apps on the Pebble appstore:
+<https://apps.repebble.com/apps/dev/syker-software_9f6c9c6e9ce88af6a0db953e>
