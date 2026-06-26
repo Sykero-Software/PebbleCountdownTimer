@@ -12,7 +12,7 @@
     "uuid": "6514c531-5e09-470e-8ffb-ce633f721e64",
     "sdkVersion": "3",
     "enableMultiJS": true,
-    "targetPlatforms": ["aplite", "basalt", "chalk", "diorite", "emery", "flint", "gabbro"],
+    "targetPlatforms": ["aplite", "basalt", "diorite", "emery", "flint"],
     "capabilities": [],
     "watchapp": { "watchface": false },
     "messageKeys": ["TimerConfig", "SortOrder", "Request", "AutoReturn", "RunningFirst", "AddTimer", "DeleteTimer"],
