@@ -70,3 +70,12 @@ bool store_load_runningfirst(void) {
 void store_save_runningfirst(bool on) {
   persist_write_bool(PERSIST_KEY_RUNNINGFIRST, on);
 }
+
+int store_load_idleexit(void) {
+  if (!persist_exists(PERSIST_KEY_IDLEEXIT)) { return 15; }   // default 15s ON
+  return persist_read_int(PERSIST_KEY_IDLEEXIT);
+}
+
+void store_save_idleexit(int seconds) {
+  persist_write_int(PERSIST_KEY_IDLEEXIT, seconds);
+}

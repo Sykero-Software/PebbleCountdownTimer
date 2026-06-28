@@ -64,6 +64,41 @@ static void close_to_watchface(void) {
   window_stack_pop_all(true);
 }
 
+// ---- idle auto-exit: return to the watchface after s_idle_timeout_sec of no
+// button press in the list/detail views. Armed in each target window's .appear,
+// cancelled in .disappear (so the alarm / confirm / delete modals pause it for
+// free), and reset by every action handler. 0 = feature off. ----
+static int       s_idle_timeout_sec; // seconds; 0 disables
+static AppTimer *s_idle_timer;
+
+static void idle_cancel(void) {
+  if (s_idle_timer) { app_timer_cancel(s_idle_timer); s_idle_timer = NULL; }
+}
+static void idle_fire(void *ctx) {
+  s_idle_timer = NULL;
+  close_to_watchface();
+}
+static void idle_reset(void) {
+  if (s_idle_timeout_sec <= 0) { idle_cancel(); return; }
+  if (s_idle_timer) { app_timer_reschedule(s_idle_timer, s_idle_timeout_sec * 1000); }
+  else { s_idle_timer = app_timer_register(s_idle_timeout_sec * 1000, idle_fire, NULL); }
+}
+// Read the timeout seconds tolerantly: Clay's default auto-send delivers a
+// `select` value as a CString; a custom handler sends an int. Returns -1 when
+// the key is absent (leave the current value unchanged). NB: hand-rolled digit
+// parse — atoi/strtol are NOT exported by the Core firmware (hard fault).
+static int idle_read_seconds(Tuple *t) {
+  if (!t) { return -1; }
+  if (t->type == TUPLE_CSTRING) {
+    int v = 0; const char *p = t->value->cstring;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p++ - '0'); }
+    return v;
+  }
+  return (int)t->value->int32;
+}
+static void idle_appear(Window *w) { idle_reset(); }
+static void idle_disappear(Window *w) { idle_cancel(); }
+
 // ---- wakeup: keep exactly ONE armed for the soonest running end_time ----
 static void rearm_wakeup(void) {
   int32_t old = store_load_wakeup_id();
@@ -414,6 +449,7 @@ static void remove_timer_at(int idx);              // defined below (delete path
 static void show_start_confirmation(int idx);      // defined below (auto-return tail)
 
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  idle_reset();
   int idx = s_detail_idx;
   if (idx < 0 || idx >= s_count) { return; }
   dl_rebuild_actions();
@@ -553,7 +589,8 @@ static void open_detail_window(int timer_idx) {
   if (!s_detail_window) {
     s_detail_window = window_create();
     window_set_window_handlers(s_detail_window, (WindowHandlers){
-      .load = detail_window_load, .unload = detail_window_unload });
+      .load = detail_window_load, .unload = detail_window_unload,
+      .appear = idle_appear, .disappear = idle_disappear });
   }
   // Idempotent: if it is already on the stack (e.g. it was open under the alarm when
   // a timer expired), just refresh it instead of pushing it a second time.
@@ -700,6 +737,7 @@ static void show_start_confirmation(int idx) {
 }
 
 static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  idle_reset();
   if (s_count == 0) { return; }
   int idx = s_order[ci->row];
   // An unstarted (idle) timer has only one useful action — skip the menu, just start.
@@ -718,6 +756,7 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
 // idle timer directly). This is how an idle/done timer reaches the +/- adjust and
 // the "Save as new & start" action.
 static void ml_select_long(MenuLayer *ml, MenuIndex *ci, void *ctx) {
+  idle_reset();
   if (s_count == 0) { return; }
   open_detail_window(s_order[ci->row]);
 }
@@ -740,6 +779,13 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if (runfirst) {
     s_running_first = runfirst->value->int32 != 0;
     store_save_runningfirst(s_running_first);
+  }
+  Tuple *idle = dict_find(iter, MESSAGE_KEY_IdleExitSec);
+  int isec = idle_read_seconds(idle);
+  if (isec >= 0) {
+    s_idle_timeout_sec = isec;
+    store_save_idleexit(isec);
+    idle_reset();
   }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
@@ -856,6 +902,7 @@ static void init(void) {
   s_sort = (SortMode)store_load_sort();
   s_auto_return = store_load_autoreturn();
   s_running_first = store_load_runningfirst();
+  s_idle_timeout_sec = store_load_idleexit();
 #ifdef SCREENSHOT_FIXTURES
   if (s_count == 0) {
     s_count = 3;
@@ -880,7 +927,8 @@ static void init(void) {
   request_config();   // pull config from the phone (covers app-closed-at-Save case)
 
   s_window = window_create();
-  window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload });
+  window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload,
+    .appear = idle_appear, .disappear = idle_disappear });
   window_stack_push(s_window, true);
   rebuild_order();
   ensure_ticking();
@@ -895,6 +943,7 @@ static void init(void) {
 
 static void deinit(void) {
   if (s_tick) { app_timer_cancel(s_tick); }
+  idle_cancel();
   persist_all();
   rearm_wakeup();   // ensure the closed-app wakeup reflects final state
   if (s_confirm_window) { window_destroy(s_confirm_window); }

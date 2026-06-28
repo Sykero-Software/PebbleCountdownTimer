@@ -38,6 +38,17 @@ const config = [
         label: 'Return to watchface after starting or stopping a timer',
         description: 'When on, the app closes back to the watchface once you start or stop a timer.',
         defaultValue: true },
+      // select values MUST be strings (Clay); index.ts parseInts on save.
+      { type: 'select', messageKey: 'IdleExitSec',
+        label: 'Return to watchface when idle',
+        description: 'Close back to the watchface after this many seconds with no button press in the timer list or detail view. Off disables it.',
+        defaultValue: '15', options: [
+          { label: 'Off', value: '0' },
+          { label: '10 seconds', value: '10' },
+          { label: '15 seconds', value: '15' },
+          { label: '30 seconds', value: '30' },
+          { label: '60 seconds', value: '60' },
+        ] },
     ],
   },
   { type: 'submit', defaultValue: 'Save' },

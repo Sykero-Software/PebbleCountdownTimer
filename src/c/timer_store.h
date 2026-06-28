@@ -10,6 +10,7 @@
 #define PERSIST_KEY_SORTORDER 4
 #define PERSIST_KEY_AUTORETURN 5
 #define PERSIST_KEY_RUNNINGFIRST 6
+#define PERSIST_KEY_IDLEEXIT 7       // idle auto-exit timeout, seconds (0 = off)
 #define PERSIST_KEY_TIMER_BASE 100   // timer i -> key 100+i (one Timer per key; 256B/key cap)
 #define STORE_SCHEMA 2
 
@@ -29,3 +30,6 @@ void store_save_autoreturn(bool on);
 // Running-timers-first list ordering (defaults to true when unset).
 bool store_load_runningfirst(void);
 void store_save_runningfirst(bool on);
+// Idle auto-exit timeout in seconds (defaults to 15 when unset; 0 = off).
+int store_load_idleexit(void);
+void store_save_idleexit(int seconds);
