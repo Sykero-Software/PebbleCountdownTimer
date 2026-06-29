@@ -203,8 +203,15 @@ int main(void) {
   an = tc_detail_actions(TS_IDLE, true, acts);    // changed -> Save row at index 1
   assert(an == 5 && acts[0] == DACT_START && acts[1] == DACT_SAVE_START &&
          acts[2] == DACT_PLUS && acts[3] == DACT_MINUS && acts[4] == DACT_DELETE);
-  an = tc_detail_actions(TS_DONE, true, acts);
-  assert(an == 5 && acts[0] == DACT_START && acts[1] == DACT_SAVE_START);
+  // DONE finished timer: Stop (reset to idle, dismisses the red 00:00:00) first,
+  // then Start (re-run), so the lingering finished row can be cleared from the list.
+  an = tc_detail_actions(TS_DONE, false, acts);   // unchanged -> no Save row
+  assert(an == 5 && acts[0] == DACT_STOP && acts[1] == DACT_START &&
+         acts[2] == DACT_PLUS && acts[3] == DACT_MINUS && acts[4] == DACT_DELETE);
+  an = tc_detail_actions(TS_DONE, true, acts);    // time tuned with +/- -> Save row after Start
+  assert(an == 6 && acts[0] == DACT_STOP && acts[1] == DACT_START &&
+         acts[2] == DACT_SAVE_START && acts[3] == DACT_PLUS &&
+         acts[4] == DACT_MINUS && acts[5] == DACT_DELETE);
 
   printf("All timer_calc tests passed\n");
   return 0;

@@ -214,7 +214,11 @@ int tc_detail_actions(TimerState st, bool changed, DetailAction *out) {
   } else if (st == TS_PAUSED) {
     out[n++] = DACT_STOP;
     out[n++] = DACT_START;   // resume
-  } else {                   // TS_IDLE / TS_DONE
+  } else if (st == TS_DONE) {
+    out[n++] = DACT_STOP;    // finished -> reset to idle, dismissing the red 00:00:00 row
+    out[n++] = DACT_START;   // re-run from full duration
+    if (changed) { out[n++] = DACT_SAVE_START; }
+  } else {                   // TS_IDLE
     out[n++] = DACT_START;
     if (changed) { out[n++] = DACT_SAVE_START; }
   }
