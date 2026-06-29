@@ -100,22 +100,44 @@ static void idle_appear(Window *w) { idle_reset(); }
 static void idle_disappear(Window *w) { idle_cancel(); }
 
 // ---- wakeup: keep exactly ONE armed for the soonest running end_time ----
+// Arm the NEW wakeup BEFORE giving up the old one, so a transiently-refused
+// schedule (slot taken / E_RANGE) can never leave the app with no wakeup at all.
+// (The previous order cancelled first, so if every schedule attempt failed the
+// app was left wakeup-less and the timer then expired silently while closed — no
+// buzz, just a red 00:00:00 on the next open.)
 static void rearm_wakeup(void) {
   int32_t old = store_load_wakeup_id();
-  if (old >= 0) { wakeup_cancel(old); store_save_wakeup_id(-1); }
   int64_t soon;
-  if (tc_soonest_end(s_timers, s_count, &soon)) {
-    time_t when = (time_t)soon;
-    time_t nowt = time(NULL);
-    if (when <= nowt) { when = nowt + 1; }
-    // wakeup needs >=1 min separation from other apps; nudge forward on failure.
-    for (int attempt = 0; attempt < 4; attempt++) {
-      WakeupId id = wakeup_schedule(when, 0, true);
-      if (id >= 0) { store_save_wakeup_id(id); return; }
-      when += 60;   // E_RANGE / slot taken: try the next minute
-    }
-    APP_LOG(APP_LOG_LEVEL_WARNING, "wakeup_schedule failed after retries");
+  if (!tc_soonest_end(s_timers, s_count, &soon)) {
+    // No running timers: drop any armed wakeup.
+    if (old >= 0) { wakeup_cancel(old); store_save_wakeup_id(-1); }
+    return;
   }
+  time_t nowt = time(NULL);
+  time_t base = (time_t)soon;
+  if (base <= nowt) { base = nowt + 1; }
+
+  // 1) Try the exact desired time while KEEPING the old wakeup, so a success never
+  //    leaves a gap with nothing armed. Fresh arms and changed-soonest re-arms take
+  //    this path and land exactly on time.
+  WakeupId id = wakeup_schedule(base, 0, true);
+  if (id >= 0) {
+    if (old >= 0 && old != id) { wakeup_cancel(old); }
+    store_save_wakeup_id(id);
+    return;
+  }
+  // 2) Exact slot refused. The usual reason is our OWN existing wakeup sitting
+  //    within the 1-min guard (a redundant re-arm for an unchanged soonest), so
+  //    drop the old one and retry the exact time first, then nudge forward a few
+  //    minutes for a slot genuinely contended by another app's wakeup.
+  if (old >= 0) { wakeup_cancel(old); store_save_wakeup_id(-1); }
+  time_t when = base;
+  for (int attempt = 0; attempt < 5; attempt++) {
+    id = wakeup_schedule(when, 0, true);
+    if (id >= 0) { store_save_wakeup_id(id); return; }
+    when += 60;   // E_RANGE / slot taken: try the next minute
+  }
+  APP_LOG(APP_LOG_LEVEL_WARNING, "wakeup_schedule failed after retries");
 }
 
 static void persist_all(void) { store_save(s_timers, s_count); }
@@ -933,8 +955,13 @@ static void init(void) {
   rebuild_order();
   ensure_ticking();
 
-  // Launched by a wakeup because a timer finished -> show the alarm over the list.
-  if (by_wakeup && fired) { trigger_alarm(s_last_fired_idx, fired); }
+  // A timer finished since the app last closed -> show the alarm over the list and
+  // buzz. This covers the wakeup-launched case AND a manual open where the wakeup
+  // never fired (failed to arm / dropped by the firmware): sweep_expiries only
+  // counts a RUNNING timer that has just crossed its end_time, so `fired` is a
+  // genuine "you may have missed this finish" signal regardless of launch reason.
+  (void)by_wakeup;
+  if (fired) { trigger_alarm(s_last_fired_idx, fired); }
 
 #ifdef SCREENSHOT_FIXTURES
   // (list view fixture: 3 seeded timers above show on the list directly)
