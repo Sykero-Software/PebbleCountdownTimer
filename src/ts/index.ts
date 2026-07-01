@@ -41,10 +41,12 @@ Pebble.addEventListener('appmessage', (e: any) => {
 });
 
 Pebble.addEventListener('showConfiguration', () => {
+  Pebble.sendAppMessage({ CfgOpen: 1 });   // pause the watch's idle auto-exit while the config page is open
   Pebble.openURL(clay.generateUrl());
 });
 
 Pebble.addEventListener('webviewclosed', (e: any) => {
+  Pebble.sendAppMessage({ CfgOpen: 0 });   // config closed -> resume the watch's idle auto-exit (also on cancel)
   if (!e || !e.response) { console.log('No settings changed'); return; }
   const raw = clay.getSettings(e.response, false);
   const s: Record<string, any> = {};
