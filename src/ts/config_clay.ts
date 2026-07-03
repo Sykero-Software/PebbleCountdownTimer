@@ -49,6 +49,10 @@ const config = [
           { label: '30 seconds', value: '30' },
           { label: '60 seconds', value: '60' },
         ] },
+      { type: 'toggle', messageKey: 'LaunchSync',
+        label: 'Launch-sync template starts',
+        description: 'When on, Templates shows elapsed time since app launch and new template starts subtract that elapsed time.',
+        defaultValue: false },
     ],
   },
   {

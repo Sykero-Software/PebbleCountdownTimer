@@ -26,21 +26,29 @@ static char s_alarm_sub_buf[48];
 static AppTimer *s_alarm_buzz_timer;
 static int64_t   s_alarm_buzz_start_s;
 
-static Timer s_timers[MAX_TIMERS];
-static int s_count = 0;
-static int s_order[MAX_TIMERS];   // display order, rebuilt on reload per s_sort
+static Timer s_templates[MAX_TIMERS];
+static int s_template_count = 0;
+static int s_template_order[MAX_TIMERS];
+static Timer s_instances[MAX_TIMERS];
+static int s_instance_count = 0;
+static int s_instance_order[MAX_TIMERS];
 static SortMode s_sort = SORT_MRU;
 static int s_last_fired_idx = -1; // first timer that newly expired in the latest sweep
 static bool s_auto_return = false; // config: pop to watchface after a start/resume
 static bool s_running_first = true; // config: float RUNNING timers to the top
+static bool s_opening_with_modified = false; // long-pressed template -> preselect +1 min
+static int s_pending_main_select_idx = -1;   // select this instance when detail closes to main
+static bool s_launch_sync = false; // config: template starts subtract elapsed-from-launch
+static int64_t s_app_launch_s = 0; // set once in init; base for launch-sync elapsed
 
 // ---- per-timer detail window: live-time header + Pause/Stop/+N actions ----
 static Window *s_detail_window;
 static MenuLayer *s_detail_menu;
-static int s_detail_idx = -1;   // config index the detail window is showing
+static int s_detail_idx = -1;   // instance index the detail window is showing
+static int s_detail_template_idx = -1; // template index when detail opened from a template row
+static bool s_detail_new_template = false; // synthetic "+ New timer" template draft mode
 static DetailAction s_detail_acts[7];   // rebuilt per reload by dl_rebuild_actions
 static int s_detail_act_count = 0;
-static int s_new_timer_idx = -1;  // index in s_timers of an un-started draft new timer, or -1
 
 // ---- transient "Started" confirmation shown ~1.1s before auto-return closes the app ----
 static Window  *s_confirm_window;
@@ -54,6 +62,8 @@ static bool s_confirm_named;
 static Window  *s_del_window;
 static Layer   *s_del_layer;
 static char     s_del_name[NAME_LEN + 1];
+
+typedef enum { MAIN_SECTION_RUNNING = 0, MAIN_SECTION_TEMPLATES = 1 } MainSection;
 
 static int64_t now_s(void) { return (int64_t)time(NULL); }
 
@@ -111,7 +121,7 @@ static void idle_disappear(Window *w) { idle_cancel(); }
 static void rearm_wakeup(void) {
   int32_t old = store_load_wakeup_id();
   int64_t soon;
-  if (!tc_soonest_end(s_timers, s_count, &soon)) {
+  if (!tc_soonest_end(s_instances, s_instance_count, &soon)) {
     // No running timers: drop any armed wakeup.
     if (old >= 0) { wakeup_cancel(old); store_save_wakeup_id(-1); }
     return;
@@ -143,9 +153,15 @@ static void rearm_wakeup(void) {
   APP_LOG(APP_LOG_LEVEL_WARNING, "wakeup_schedule failed after retries");
 }
 
-static void persist_all(void) { store_save(s_timers, s_count); }
+static void persist_all(void) {
+  store_save_templates(s_templates, s_template_count);
+  store_save_instances(s_instances, s_instance_count);
+}
 
-static void rebuild_order(void) { tc_display_order(s_timers, s_count, s_sort, now_s(), s_order, s_running_first); }
+static void rebuild_order(void) {
+  tc_display_order(s_templates, s_template_count, s_sort, now_s(), s_template_order, false);
+  tc_display_order(s_instances, s_instance_count, s_sort, now_s(), s_instance_order, s_running_first);
+}
 
 static void reload_ui(void) {
   rebuild_order();
@@ -153,15 +169,35 @@ static void reload_ui(void) {
 }
 
 static void ensure_ticking(void);   // defined below; used by the alarm handlers
-static void open_detail_window(int timer_idx);  // defined below; used by the alarm snooze
+static void open_detail_window(int timer_idx, int template_idx);  // defined below; used by the alarm snooze
+static void remove_timer_at(int idx);           // defined below; used by stop paths
+static void remove_template_at(int idx);        // defined below; used by template-delete path
+
+static int32_t launch_elapsed_s(void) {
+  if (s_app_launch_s <= 0) { return 0; }
+  int64_t d = now_s() - s_app_launch_s;
+  if (d < 0) { return 0; }
+  return (int32_t)d;
+}
+
+static void format_templates_header(char *buf, size_t n) {
+  if (!s_launch_sync) {
+    snprintf(buf, n, "Templates");
+    return;
+  }
+  int32_t e = launch_elapsed_s();
+  int m = (int)(e / 60);
+  int s = (int)(e % 60);
+  snprintf(buf, n, "Templates -%d:%02d", m, s);
+}
 
 // Mark every expired RUNNING timer DONE. Returns the count that NEWLY expired and
 // sets s_last_fired_idx to the first of them (drives the alarm screen). No UI here.
 static int sweep_expiries(void) {
   int fired = 0;
   int64_t now = now_s();
-  for (int i = 0; i < s_count; i++) {
-    if (tc_check_expiry(&s_timers[i], now)) {
+  for (int i = 0; i < s_instance_count; i++) {
+    if (tc_check_expiry(&s_instances[i], now)) {
       if (fired == 0) { s_last_fired_idx = i; }
       fired++;
     }
@@ -199,11 +235,11 @@ static void alarm_buzz_stop(void) {
 }
 
 static void alarm_stop(ClickRecognizerRef rec, void *ctx) {
-  // Stop: reset the finished timer directly from the alarm, then close the app
+  // Stop: drop the finished instance directly from the alarm, then close the app
   // (-> watchface). The alarm often fires while the app is closed (wakeup-launched),
   // so after dismissing the user wants the watchface, not to be left in the app.
-  if (s_alarm_idx >= 0 && s_alarm_idx < s_count) {
-    tc_reset(&s_timers[s_alarm_idx], now_s());
+  if (s_alarm_idx >= 0 && s_alarm_idx < s_instance_count) {
+    remove_timer_at(s_alarm_idx);
     persist_all(); rearm_wakeup(); reload_ui();
   }
   close_to_watchface();
@@ -214,10 +250,10 @@ static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
   // that timer's own detail window. Push the detail window over the alarm first, then
   // silently drop the alarm from beneath it (no flash back to the list).
   int idx = s_alarm_idx;
-  if (idx >= 0 && idx < s_count) {
-    tc_extend(&s_timers[idx], 60, now_s());
+  if (idx >= 0 && idx < s_instance_count) {
+    tc_extend(&s_instances[idx], 60, now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
-    open_detail_window(idx);
+    open_detail_window(idx, -1);
     window_stack_remove(s_alarm_window, false);
   } else {
     window_stack_remove(s_alarm_window, true);
@@ -225,7 +261,7 @@ static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
 }
 
 static void alarm_click_config(void *ctx) {
-  window_single_click_subscribe(BUTTON_ID_DOWN, alarm_stop);        // Stop: reset + dismiss
+  window_single_click_subscribe(BUTTON_ID_DOWN, alarm_stop);        // Stop: remove + dismiss
   window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);    // +1 Min: snooze + dismiss
   window_single_click_subscribe(BUTTON_ID_BACK, alarm_add_minute);  // Back = snooze (matches stock)
 }
@@ -334,9 +370,9 @@ static void alarm_window_unload(Window *w) {
 // Show the alarm for timer `idx` (first of `count` that just finished): big name,
 // long vibration, backlight on briefly; Select resets it.
 static void trigger_alarm(int idx, int count) {
-  if (idx < 0 || idx >= s_count) { return; }
+  if (idx < 0 || idx >= s_instance_count) { return; }
   s_alarm_idx = idx;
-  Timer *t = &s_timers[idx];
+  Timer *t = &s_instances[idx];
   if (t->name[0]) {
     snprintf(s_alarm_title_buf, sizeof(s_alarm_title_buf), "%s", t->name);
   } else {
@@ -368,19 +404,23 @@ static void trigger_alarm(int idx, int count) {
 static void tick_cb(void *ctx) {
   int fired = sweep_expiries();
   bool running = false;
-  for (int i = 0; i < s_count; i++) { if (s_timers[i].state == TS_RUNNING) { running = true; } }
+  for (int i = 0; i < s_instance_count; i++) { if (s_instances[i].state == TS_RUNNING) { running = true; } }
   reload_ui();
   if (s_detail_menu && window_stack_get_top_window() == s_detail_window) {
     menu_layer_reload_data(s_detail_menu);   // retick the live time header
   }
   if (fired) { persist_all(); rearm_wakeup(); trigger_alarm(s_last_fired_idx, fired); }
-  s_tick = running ? app_timer_register(1000, tick_cb, NULL) : NULL;
+  s_tick = (running || s_launch_sync) ? app_timer_register(1000, tick_cb, NULL) : NULL;
 }
 
 static void ensure_ticking(void) {
   if (s_tick) { return; }
-  for (int i = 0; i < s_count; i++) {
-    if (s_timers[i].state == TS_RUNNING) { s_tick = app_timer_register(1000, tick_cb, NULL); return; }
+  if (s_launch_sync) {
+    s_tick = app_timer_register(1000, tick_cb, NULL);
+    return;
+  }
+  for (int i = 0; i < s_instance_count; i++) {
+    if (s_instances[i].state == TS_RUNNING) { s_tick = app_timer_register(1000, tick_cb, NULL); return; }
   }
 }
 
@@ -390,8 +430,8 @@ static void ensure_ticking(void) {
 // LIST cursor to follow it to its new row so the user needn't scroll to it.
 static void select_timer_row(int idx) {
   if (!s_menu) { return; }
-  for (int row = 0; row < s_count; row++) {
-    if (s_order[row] == idx) {
+  for (int row = 0; row < s_instance_count; row++) {
+    if (s_instance_order[row] == idx) {
       menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = 0, .row = (uint16_t)row },
                                     MenuRowAlignTop, false);
       return;
@@ -400,9 +440,23 @@ static void select_timer_row(int idx) {
 }
 
 static void dl_rebuild_actions(void) {
-  if (s_detail_idx < 0 || s_detail_idx >= s_count) { s_detail_act_count = 0; return; }
-  Timer *t = &s_timers[s_detail_idx];
-  s_detail_act_count = tc_detail_actions(t->state, tc_detail_changed(t), s_detail_acts);
+  if (s_detail_new_template) {
+    s_detail_act_count = 0;
+    s_detail_acts[s_detail_act_count++] = DACT_PLUS;
+    s_detail_acts[s_detail_act_count++] = DACT_MINUS;
+    s_detail_acts[s_detail_act_count++] = DACT_DELETE;
+    return;
+  }
+  if (s_detail_idx < 0 || s_detail_idx >= s_instance_count) { s_detail_act_count = 0; return; }
+  Timer *t = &s_instances[s_detail_idx];
+  DetailAction raw[7];
+  int n = tc_detail_actions(t->state, false, raw);
+  s_detail_act_count = 0;
+  for (int i = 0; i < n; i++) {
+    if (raw[i] == DACT_SAVE_START) { continue; }
+    if (s_detail_template_idx < 0 && raw[i] == DACT_DELETE) { continue; }
+    s_detail_acts[s_detail_act_count++] = raw[i];
+  }
 }
 
 // Move the detail cursor onto the row that now carries action `a` (the list can
@@ -420,6 +474,7 @@ static void dl_select_action(DetailAction a) {
 }
 
 static const char *dl_action_label(DetailAction a) {
+  if (s_detail_new_template && a == DACT_DELETE) { return "Cancel"; }
   switch (a) {
     case DACT_STOP:       return "Stop";
     case DACT_PAUSE:      return "Pause";
@@ -441,8 +496,21 @@ static int16_t dl_header_height(MenuLayer *ml, uint16_t section, void *ctx) { re
 
 // Header: timer name (left) + live remaining time (right); time only if unnamed.
 static void dl_draw_header(GContext *gctx, const Layer *cell, uint16_t section, void *ctx) {
-  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return; }
-  Timer *t = &s_timers[s_detail_idx];
+  if (s_detail_new_template) {
+    if (s_detail_idx < 0 || s_detail_idx >= s_instance_count) { return; }
+    Timer *t = &s_instances[s_detail_idx];
+    char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
+    GRect b = layer_get_bounds(cell);
+    GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+    graphics_context_set_text_color(gctx, GColorBlack);
+    graphics_draw_text(gctx, "New timer", f, GRect(4, 3, b.size.w - 92, 26),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(gctx, rem, f, GRect(4, 3, b.size.w - 8, 26),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    return;
+  }
+  if (s_detail_idx < 0 || s_detail_idx >= s_instance_count) { return; }
+  Timer *t = &s_instances[s_detail_idx];
   char rem[16]; tc_format_remaining(rem, sizeof(rem), tc_remaining_now(t, now_s()));
   GRect b = layer_get_bounds(cell);
   GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
@@ -468,21 +536,50 @@ static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
 }
 
 static void save_as_new_and_start(int32_t secs);  // defined below
-static void send_add_timer(int32_t secs);          // defined below (phone sync)
-static void create_new_timer(void);                // defined below ("+ New timer" row)
 static void open_delete_confirm(void);             // defined below (delete path)
-static void send_delete_timer(int32_t idx);        // defined below (delete path)
-static void remove_timer_at(int idx);              // defined below (delete path)
 static void show_start_confirmation(int idx);      // defined below (auto-return tail)
+static void send_delete_timer(int32_t idx);        // defined below (template delete sync)
+static int start_instance_from_template(int template_idx); // defined below
 
 static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   idle_reset();
   int idx = s_detail_idx;
-  if (idx < 0 || idx >= s_count) { return; }
   dl_rebuild_actions();
   if (ci->row >= s_detail_act_count) { return; }
   DetailAction a = s_detail_acts[ci->row];
-  Timer *t = &s_timers[idx];
+  if (s_detail_new_template) {
+    switch (a) {
+      case DACT_PLUS:
+      case DACT_MINUS: {
+        if (idx < 0 || idx >= s_instance_count) { return; }
+        int32_t secs = (a == DACT_PLUS) ? 60 : -60;
+        tc_add(&s_instances[idx], secs, now_s());
+        if (s_instances[idx].state == TS_PAUSED && s_instances[idx].remaining < 60) {
+          s_instances[idx].remaining = 60;
+        }
+        if (s_instances[idx].state == TS_RUNNING && tc_remaining_now(&s_instances[idx], now_s()) < 60) {
+          tc_extend(&s_instances[idx], 60, now_s());
+        }
+        persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+        menu_layer_reload_data(s_detail_menu);
+        dl_select_action(a);
+        return;
+      }
+      case DACT_DELETE:
+        if (idx >= 0 && idx < s_instance_count) {
+          remove_timer_at(idx);
+          persist_all(); rearm_wakeup(); reload_ui();
+        }
+        s_pending_main_select_idx = -1;
+        s_detail_new_template = false;
+        window_stack_remove(s_detail_window, true);
+        return;
+      default:
+        return;
+    }
+  }
+  if (idx < 0 || idx >= s_instance_count) { return; }
+  Timer *t = &s_instances[idx];
   switch (a) {
     case DACT_PAUSE:
       tc_pause(t, now_s());
@@ -493,10 +590,6 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
       break;
     case DACT_START:                    // start (idle/done) or resume (paused), in place
       tc_start(t, now_s());
-      if (idx == s_new_timer_idx) {      // draft commit: sync final duration, then it's a real timer
-        send_add_timer(t->duration);
-        s_new_timer_idx = -1;
-      }
       persist_all(); rearm_wakeup(); ensure_ticking();
       reload_ui();
       if (s_auto_return) { show_start_confirmation(idx); }   // flash, then pop to watchface
@@ -507,25 +600,15 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
       save_as_new_and_start(rem >= 1 ? rem : t->duration);
       break;
     }
-    case DACT_STOP:                     // reset to idle
-      tc_reset(t, now_s());
-      persist_all(); rearm_wakeup(); reload_ui(); select_timer_row(idx);
+    case DACT_STOP:                     // remove this instance
+      remove_timer_at(idx);
+      persist_all(); rearm_wakeup(); reload_ui();
       if (s_auto_return) { close_to_watchface(); }
       else { window_stack_remove(s_detail_window, true); }
       break;
     case DACT_PLUS:
     case DACT_MINUS: {
       int32_t secs = (a == DACT_PLUS) ? 60 : -60;
-      if (idx == s_new_timer_idx && t->state == TS_IDLE) {
-        // Draft new timer: +/- sets the DURATION (the saved length); remaining tracks
-        // it, so it stays "unchanged" (no Start & Save). RAM-only: do NOT persist/sync.
-        int32_t d = t->duration + secs;
-        if (d < 60) { d = 60; }
-        t->duration = d; t->remaining = d; t->last_used = now_s();
-        reload_ui(); menu_layer_reload_data(s_detail_menu);
-        dl_select_action(a);
-        break;
-      }
       if (t->state == TS_RUNNING || t->state == TS_PAUSED) {
         tc_add(t, secs, now_s());
       } else {                          // idle/done: adjust `remaining` (60s floor), keep template
@@ -560,9 +643,16 @@ static void detail_window_load(Window *w) {
   menu_layer_set_highlight_colors(s_detail_menu, GColorBlack, GColorWhite);
   menu_layer_set_click_config_onto_window(s_detail_menu, w);
   layer_add_child(root, menu_layer_get_layer(s_detail_menu));
+  if (s_opening_with_modified) { dl_rebuild_actions(); dl_select_action(DACT_PLUS); s_opening_with_modified = false; }
 }
 
 static void detail_window_unload(Window *w) {
+  if (s_pending_main_select_idx >= 0) {
+    select_timer_row(s_pending_main_select_idx);
+    s_pending_main_select_idx = -1;
+  }
+  s_detail_new_template = false;
+  s_detail_template_idx = -1;
   menu_layer_destroy(s_detail_menu); s_detail_menu = NULL;
 }
 
@@ -593,13 +683,25 @@ static void del_window_unload(Window *w) {
 // the detail window so we land back on the LIST (delete is management, not an exit).
 static void del_confirm_select(ClickRecognizerRef rec, void *ctx) {
   int idx = s_detail_idx;
-  if (idx >= 0 && idx < s_count) {
-    if (idx == s_new_timer_idx) { s_new_timer_idx = -1; }  // draft: never synced -> no phone delete
-    else { send_delete_timer(idx); }
+  if (s_detail_new_template) {
+    s_detail_new_template = false;
+    s_pending_main_select_idx = -1;
+  } else if (s_detail_template_idx >= 0 && s_detail_template_idx < s_template_count) {
+    // Template-origin detail starts an instance immediately on long press; if
+    // user chooses Delete, roll that instance back so no timer is left running.
+    if (idx >= 0 && idx < s_instance_count) {
+      remove_timer_at(idx);
+    }
+    s_pending_main_select_idx = -1;
+    send_delete_timer(s_detail_template_idx);
+    remove_template_at(s_detail_template_idx);
+    persist_all(); rearm_wakeup(); reload_ui();
+  } else if (idx >= 0 && idx < s_instance_count) {
     remove_timer_at(idx);
     persist_all(); rearm_wakeup(); reload_ui();
   }
   s_detail_idx = -1;
+  s_detail_template_idx = -1;
   window_stack_remove(s_del_window, false);
   window_stack_remove(s_detail_window, true);
 }
@@ -610,12 +712,25 @@ static void del_click_config(void *ctx) {
 }
 
 static void open_delete_confirm(void) {
-  if (s_detail_idx < 0 || s_detail_idx >= s_count) { return; }
-  Timer *t = &s_timers[s_detail_idx];
-  if (t->name[0]) {
-    snprintf(s_del_name, sizeof(s_del_name), "%s", t->name);
+  if (s_detail_new_template) {
+    if (s_detail_idx < 0 || s_detail_idx >= s_instance_count) { return; }
+    tc_format_remaining(s_del_name, sizeof(s_del_name), tc_remaining_now(&s_instances[s_detail_idx], now_s()));
+  } else if (s_detail_template_idx >= 0 && s_detail_template_idx < s_template_count) {
+    Timer *tt = &s_templates[s_detail_template_idx];
+    if (tt->name[0]) {
+      snprintf(s_del_name, sizeof(s_del_name), "%s", tt->name);
+    } else {
+      tc_format_remaining(s_del_name, sizeof(s_del_name), tt->duration);
+    }
+  } else if (s_detail_idx >= 0 && s_detail_idx < s_instance_count) {
+    Timer *t = &s_instances[s_detail_idx];
+    if (t->name[0]) {
+      snprintf(s_del_name, sizeof(s_del_name), "%s", t->name);
+    } else {
+      tc_format_remaining(s_del_name, sizeof(s_del_name), tc_remaining_now(t, now_s()));
+    }
   } else {
-    tc_format_remaining(s_del_name, sizeof(s_del_name), tc_remaining_now(t, now_s()));
+    return;
   }
   if (!s_del_window) {
     s_del_window = window_create();
@@ -626,72 +741,64 @@ static void open_delete_confirm(void) {
   window_stack_push(s_del_window, true);
 }
 
-// Leaving the detail window: stop the idle timer AND discard an un-started draft
-// new timer (BACK without Start). A committed timer has s_new_timer_idx == -1
-// (cleared in DACT_START), so this never discards a started/real timer.
-static void detail_disappear(Window *w) {
-  idle_cancel();
-  if (s_new_timer_idx >= 0 && s_new_timer_idx == s_detail_idx
-      && s_new_timer_idx < s_count && s_timers[s_new_timer_idx].state == TS_IDLE) {
-    remove_timer_at(s_new_timer_idx);
-    s_new_timer_idx = -1;
-    reload_ui();
-  }
-}
-
-static void open_detail_window(int timer_idx) {
+static void open_detail_window(int timer_idx, int template_idx) {
   s_detail_idx = timer_idx;
+  s_detail_template_idx = template_idx;
+  if (timer_idx < 0) { s_detail_new_template = true; }
   if (!s_detail_window) {
     s_detail_window = window_create();
     window_set_window_handlers(s_detail_window, (WindowHandlers){
       .load = detail_window_load, .unload = detail_window_unload,
-      .appear = idle_appear, .disappear = detail_disappear });
+      .appear = idle_appear, .disappear = idle_disappear });
   }
   // Idempotent: if it is already on the stack (e.g. it was open under the alarm when
   // a timer expired), just refresh it instead of pushing it a second time.
   if (window_stack_contains_window(s_detail_window)) {
-    if (s_detail_menu) { menu_layer_reload_data(s_detail_menu); }
+    if (s_detail_menu) {
+      menu_layer_reload_data(s_detail_menu);
+      if (s_opening_with_modified) { dl_rebuild_actions(); dl_select_action(DACT_PLUS); s_opening_with_modified = false; }
+    }
   } else {
     window_stack_push(s_detail_window, true);
   }
 }
 
 // ---- MenuLayer callbacks ----
-// The "+ New timer" action row is always the LAST row. With an empty list the
-// two-line hint occupies row 0 and "New timer" is row 1.
-static bool ml_is_new_row(uint16_t row) {
-  return row == (s_count == 0 ? 1 : (uint16_t)s_count);
+static uint16_t ml_num_sections(MenuLayer *ml, void *ctx) {
+  return 2;
 }
+
 static uint16_t ml_num_rows(MenuLayer *ml, uint16_t section, void *ctx) {
-  // timers + trailing "New timer"; empty list: hint row + "New timer".
-  return s_count == 0 ? 2 : s_count + 1;
+  if (section == MAIN_SECTION_RUNNING) {
+    return (s_instance_count == 0 && s_template_count == 0) ? 1 : (uint16_t)s_instance_count;
+  }
+  return section == MAIN_SECTION_TEMPLATES ? (uint16_t)(s_template_count + 1) : 0;
 }
 // Timer rows are single-line (32px); the empty-state row uses menu_cell_basic_draw
 // (title + subtitle), which needs the taller 44px to render both lines without clipping.
 static int16_t ml_cell_height(MenuLayer *ml, MenuIndex *ci, void *ctx) {
-  if (s_count == 0 && ci->row == 0) { return 44; }   // two-line empty-state hint
-  return 32;                                          // timer rows + "New timer" row
+  if (ci->section == MAIN_SECTION_RUNNING && s_instance_count == 0 && s_template_count == 0) { return 44; }
+  return 32;
 }
 
-static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
-  if (ml_is_new_row(ci->row)) {
-    GRect b = layer_get_bounds(cell);
-    MenuIndex sel = menu_layer_get_selected_index(s_menu);
-    bool selected = (menu_index_compare(&sel, ci) == 0);
-    graphics_context_set_fill_color(gctx, selected ? GColorBlack : GColorWhite);
-    graphics_fill_rect(gctx, b, 0, GCornerNone);
-    graphics_context_set_text_color(gctx, selected ? GColorWhite : GColorBlack);
-    graphics_draw_text(gctx, "+ New timer", fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(4, (b.size.h - 26) / 2, b.size.w - 8, 26),
-      GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    return;
-  }
-  if (s_count == 0) {
+static int16_t ml_header_height(MenuLayer *ml, uint16_t section, void *ctx) {
+  return section == MAIN_SECTION_TEMPLATES ? 20 : 0;
+}
+
+static void ml_draw_header(GContext *gctx, const Layer *cell, uint16_t section, void *ctx) {
+  if (section != MAIN_SECTION_TEMPLATES) { return; }
+  char title[32];
+  format_templates_header(title, sizeof(title));
+  graphics_context_set_text_color(gctx, GColorBlack);
+  graphics_draw_text(gctx, title, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+    GRect(6, 0, layer_get_bounds(cell).size.w - 12, 20), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+}
+
+static void ml_draw_timer_row(GContext *gctx, const Layer *cell, MenuIndex *ci, Timer *t) {
+  if (ci->section == MAIN_SECTION_RUNNING && s_instance_count == 0 && s_template_count == 0) {
     menu_cell_basic_draw(gctx, cell, "No timers", "Configure on your phone", NULL);
     return;
   }
-  int idx = s_order[ci->row];
-  Timer *t = &s_timers[idx];
   // Tint each row by state so running/paused/done stand out at a glance (color
   // displays only; b&w falls back to the standard white/black look). The selected
   // row uses a DARK shade of the same hue + white text so it still reads as the
@@ -743,6 +850,39 @@ static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
   }
 }
 
+static void ml_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *ctx) {
+  if (ci->section == MAIN_SECTION_RUNNING) {
+    if (s_instance_count == 0 && s_template_count == 0) {
+      ml_draw_timer_row(gctx, cell, ci, NULL);
+      return;
+    }
+    if (ci->row >= s_instance_count) { return; }
+    int idx = s_instance_order[ci->row];
+    ml_draw_timer_row(gctx, cell, ci, &s_instances[idx]);
+    return;
+  }
+  if (ci->section == MAIN_SECTION_TEMPLATES) {
+    if (ci->row == 0) {
+      MenuIndex sel = menu_layer_get_selected_index(s_menu);
+      bool selected = (menu_index_compare(&sel, ci) == 0);
+      graphics_context_set_fill_color(gctx, selected ? GColorBlack : GColorWhite);
+      graphics_fill_rect(gctx, layer_get_bounds(cell), 0, GCornerNone);
+      graphics_context_set_text_color(gctx, selected ? GColorWhite : GColorBlack);
+      GRect b = layer_get_bounds(cell);
+      bool small = (b.size.w <= 144);
+      GFont f = fonts_get_system_font(small ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_24_BOLD);
+      int th = small ? 22 : 28;
+      int ty = (b.size.h - th) / 2;
+      graphics_draw_text(gctx, "+ New timer", f, GRect(4, ty, b.size.w - 8, th),
+        GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+      return;
+    }
+    if (ci->row > s_template_count) { return; }
+    int idx = s_template_order[ci->row - 1];
+    ml_draw_timer_row(gctx, cell, ci, &s_templates[idx]);
+  }
+}
+
 static void confirm_timer_cb(void *data) {
   s_confirm_timer = NULL;
   close_to_watchface();   // -> watchface (with exit reason)
@@ -791,7 +931,7 @@ static void confirm_window_unload(Window *w) {
 // Flash a "Started" screen for ~1.1s, then pop the whole stack (-> watchface).
 // Only called on the idle one-tap start when AutoReturn is on.
 static void show_start_confirmation(int idx) {
-  Timer *t = &s_timers[idx];
+  Timer *t = &s_instances[idx];
   tc_format_remaining(s_confirm_time, sizeof(s_confirm_time), tc_remaining_now(t, now_s()));
   s_confirm_named = (t->name[0] != 0);
   if (s_confirm_named) {
@@ -810,21 +950,69 @@ static void show_start_confirmation(int idx) {
   s_confirm_timer = app_timer_register(1100, confirm_timer_cb, NULL);
 }
 
+static int start_instance_from_template(int template_idx) {
+  if (template_idx < 0 || template_idx >= s_template_count || s_instance_count >= MAX_TIMERS) { return -1; }
+  Timer *tpl = &s_templates[template_idx];
+  int idx = s_instance_count++;
+  s_instances[idx] = *tpl;
+  s_instances[idx].state = TS_IDLE;
+  s_instances[idx].end_time = 0;
+  s_instances[idx].custom = true;
+  int32_t start_secs = tpl->duration;
+  if (s_launch_sync) {
+    start_secs -= launch_elapsed_s();
+    if (start_secs < 1) { start_secs = 1; }
+  }
+  s_instances[idx].duration = start_secs;
+  s_instances[idx].remaining = start_secs;
+  tc_start(&s_instances[idx], now_s());
+  return idx;
+}
+
 static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   idle_reset();
-  if (ml_is_new_row(ci->row)) { create_new_timer(); return; }
-  if (s_count == 0) { return; }
-  int idx = s_order[ci->row];
-  // An unstarted (idle) timer has only one useful action — skip the menu, just start.
-  if (s_timers[idx].state == TS_IDLE) {
-    tc_start(&s_timers[idx], now_s());
+  if (ci->section == MAIN_SECTION_TEMPLATES) {
+    if (ci->row == 0) {
+      if (s_instance_count >= MAX_TIMERS) { return; }
+      int32_t secs = 60;
+      if (s_launch_sync) {
+        secs -= launch_elapsed_s();
+        if (secs < 1) { secs = 1; }
+      }
+      int idx = s_instance_count++;
+      Timer *t = &s_instances[idx];
+      memset(t, 0, sizeof(*t));
+      t->duration = secs;
+      t->remaining = secs;
+      t->state = TS_IDLE;
+      t->custom = true;
+      tc_start(t, now_s());
+      persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+      s_pending_main_select_idx = idx;
+      s_detail_new_template = true;
+      s_opening_with_modified = true;
+      open_detail_window(idx, -1);
+      return;
+    }
+    if (ci->row > s_template_count) { return; }
+    int t_idx = s_template_order[ci->row - 1];
+    int idx = start_instance_from_template(t_idx);
+    if (idx < 0) { return; }
+    persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+    if (s_auto_return) { show_start_confirmation(idx); }
+    else { select_timer_row(idx); }
+    return;
+  }
+  if (ci->section != MAIN_SECTION_RUNNING || ci->row >= s_instance_count) { return; }
+  int idx = s_instance_order[ci->row];
+  if (s_instances[idx].state == TS_IDLE) {
+    tc_start(&s_instances[idx], now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
     select_timer_row(idx);
-    if (s_auto_return) { show_start_confirmation(idx); }   // flash, then pop to watchface
+    if (s_auto_return) { show_start_confirmation(idx); }
     return;
-  } else {
-    open_detail_window(idx);
   }
+  open_detail_window(idx, -1);
 }
 
 // Long SELECT opens the detail window for ANY timer (short SELECT still starts an
@@ -832,9 +1020,22 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
 // the "Save as new & start" action.
 static void ml_select_long(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   idle_reset();
-  if (ml_is_new_row(ci->row)) { create_new_timer(); return; }
-  if (s_count == 0) { return; }
-  open_detail_window(s_order[ci->row]);
+  if (ci->section == MAIN_SECTION_TEMPLATES) {
+    if (ci->row == 0) {
+      return;
+    }
+    if (ci->row > s_template_count) { return; }
+    int t_idx = s_template_order[ci->row - 1];
+    int idx = start_instance_from_template(t_idx);
+    if (idx < 0) { return; }
+    persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
+    s_pending_main_select_idx = idx;
+    s_opening_with_modified = true;
+    open_detail_window(idx, t_idx);
+    return;
+  }
+  if (ci->section != MAIN_SECTION_RUNNING || ci->row >= s_instance_count) { return; }
+  open_detail_window(s_instance_order[ci->row], -1);
 }
 
 // ---- AppMessage inbox: a TimerConfig string + SortOrder int -> reconcile ----
@@ -863,6 +1064,12 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     store_save_idleexit(isec);
     idle_reset();
   }
+  Tuple *ls = dict_find(iter, MESSAGE_KEY_LaunchSync);
+  if (ls) {
+    s_launch_sync = ls->value->int32 != 0;
+    store_save_launchsync(s_launch_sync);
+    ensure_ticking();
+  }
   // Pause the idle auto-exit while the phone config page is open (no watch buttons are
   // pressed during config, so the idle timer would otherwise fire and kill the app —
   // and PKJS with it — closing the config page and losing unsaved changes).
@@ -874,22 +1081,17 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
-    // static, NOT on the stack: two Timer[MAX_TIMERS] arrays are ~2 KB and would
-    // overflow the Pebble app stack. The inbox handler runs on the single event
-    // loop, so static is safe.
     static Timer parsed[MAX_TIMERS];
-    static Timer merged[MAX_TIMERS];
     int pn = tc_parse_config(cfg->value->cstring, parsed, MAX_TIMERS);
-    int mn = tc_reconcile(s_timers, s_count, parsed, pn, merged);
-    memcpy(s_timers, merged, sizeof(Timer) * (size_t)mn);
-    s_count = mn;
-    // A reconcile can renumber s_timers (a grown config may overwrite the draft's
-    // slot, or shift a preserved trailing custom row), so abandon draft-tracking:
-    // otherwise a stale s_new_timer_idx could point at a real config-backed timer and
-    // let BACK delete it or Start duplicate it. The draft row itself is still
-    // preserved by tc_reconcile (custom trailing row) — only the draft flag is dropped.
-    s_new_timer_idx = -1;
-    sweep_expiries();   // mark stale expiries DONE; no alarm for a config reconcile
+    memcpy(s_templates, parsed, sizeof(Timer) * (size_t)pn);
+    s_template_count = pn;
+    for (int i = 0; i < s_template_count; i++) {
+      s_templates[i].state = TS_IDLE;
+      s_templates[i].remaining = s_templates[i].duration;
+      s_templates[i].end_time = 0;
+      s_templates[i].custom = false;
+    }
+    sweep_expiries();
     persist_all(); rearm_wakeup(); ensure_ticking();
   }
   reload_ui();
@@ -915,20 +1117,7 @@ static void request_config(void) {
   }
 }
 
-// Tell the phone to save a new unnamed timer of `secs` seconds (appended to its
-// TimerConfig + Clay store). The watch keeps the running timer locally (flagged
-// custom) so it survives even if this send fails / the phone is offline.
-static void send_add_timer(int32_t secs) {
-  DictionaryIterator *out;
-  if (app_message_outbox_begin(&out) == APP_MSG_OK) {
-    dict_write_uint32(out, MESSAGE_KEY_AddTimer, (uint32_t)secs);
-    app_message_outbox_send();
-  }
-}
-
-// Tell the phone to drop the timer at list index `idx` from its TimerConfig +
-// Clay store. Best-effort, like send_add_timer: if it fails (phone offline) the
-// watch still removes it locally, but a later config reconcile will re-add it.
+// Tell the phone to remove template index `idx` from its TimerConfig/Clay store.
 static void send_delete_timer(int32_t idx) {
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) == APP_MSG_OK) {
@@ -939,16 +1128,15 @@ static void send_delete_timer(int32_t idx) {
 
 // Remove the timer at `idx`, shifting the tail down. Caller persists + re-sorts.
 static void remove_timer_at(int idx) {
-  if (idx < 0 || idx >= s_count) { return; }
-  for (int i = idx; i < s_count - 1; i++) { s_timers[i] = s_timers[i + 1]; }
-  s_count--;
-  // Keep the draft-tracking index valid across the shift: clear it if the draft
-  // itself was removed, decrement it if a lower row was removed. Prevents
-  // s_new_timer_idx from desyncing (e.g. an alarm snooze re-points s_detail_idx
-  // to a fired timer mid-draft; a later delete would otherwise leave
-  // s_new_timer_idx pointing at the wrong row).
-  if (idx == s_new_timer_idx) { s_new_timer_idx = -1; }
-  else if (s_new_timer_idx > idx) { s_new_timer_idx--; }
+  if (idx < 0 || idx >= s_instance_count) { return; }
+  for (int i = idx; i < s_instance_count - 1; i++) { s_instances[i] = s_instances[i + 1]; }
+  s_instance_count--;
+}
+
+static void remove_template_at(int idx) {
+  if (idx < 0 || idx >= s_template_count) { return; }
+  for (int i = idx; i < s_template_count - 1; i++) { s_templates[i] = s_templates[i + 1]; }
+  s_template_count--;
 }
 
 // Create a NEW unnamed timer of `secs`, started now, appended at the end of the
@@ -956,12 +1144,12 @@ static void remove_timer_at(int idx) {
 // running row by position). Persist, send AddTimer, then apply the normal start
 // tail (confirmation + auto-return).
 static void save_as_new_and_start(int32_t secs) {
-  if (s_count >= MAX_TIMERS) {
+  if (s_instance_count >= MAX_TIMERS) {
     return;   // List full: nothing to create. (Keep it simple — no new row.)
   }
   if (secs < 1) { secs = 1; }
-  int idx = s_count;
-  Timer *t = &s_timers[idx];
+  int idx = s_instance_count;
+  Timer *t = &s_instances[idx];
   memset(t, 0, sizeof(*t));
   t->name[0] = 0;
   t->duration = secs;
@@ -969,32 +1157,12 @@ static void save_as_new_and_start(int32_t secs) {
   t->state = TS_IDLE;
   t->custom = true;
   tc_start(t, now_s());            // -> RUNNING, end_time = now + secs
-  s_count++;
+  s_instance_count++;
   persist_all(); rearm_wakeup(); ensure_ticking();
-  send_add_timer(secs);
   reload_ui();
   select_timer_row(idx);
   if (s_auto_return) { show_start_confirmation(idx); }   // flash -> watchface
   else { window_stack_remove(s_detail_window, true); }   // back to the list
-}
-
-// "+ New timer" action: create an unnamed IDLE draft timer (default 1:00) held in
-// RAM only (not persisted, not sent to the phone) and open its detail window. The
-// draft is committed on Start (persist + AddTimer) or discarded on BACK/Delete/close.
-static void create_new_timer(void) {
-  if (s_count >= MAX_TIMERS) { return; }   // list full: no-op
-  int idx = s_count;
-  Timer *t = &s_timers[idx];
-  memset(t, 0, sizeof(*t));
-  t->name[0] = 0;
-  t->duration = 60; t->remaining = 60;     // default 1:00
-  t->state = TS_IDLE;
-  t->custom = true;                        // survive a mid-draft config reconcile
-  t->last_used = now_s();
-  s_count++;
-  s_new_timer_idx = idx;
-  reload_ui();
-  open_detail_window(idx);
 }
 
 // ---- window ----
@@ -1003,8 +1171,11 @@ static void window_load(Window *w) {
   GRect bounds = layer_get_bounds(root);
   s_menu = menu_layer_create(bounds);
   menu_layer_set_callbacks(s_menu, NULL, (MenuLayerCallbacks){
+    .get_num_sections = ml_num_sections,
     .get_num_rows = ml_num_rows,
     .get_cell_height = ml_cell_height,
+    .get_header_height = ml_header_height,
+    .draw_header = ml_draw_header,
     .draw_row = ml_draw_row,
     .select_click = ml_select,
     .select_long_click = ml_select_long,
@@ -1015,18 +1186,27 @@ static void window_load(Window *w) {
 static void window_unload(Window *w) { menu_layer_destroy(s_menu); s_menu = NULL; }
 
 static void init(void) {
-  s_count = store_load(s_timers);
+  s_app_launch_s = now_s();
+  s_template_count = store_load_templates(s_templates);
+  s_instance_count = store_load_instances(s_instances);
   s_sort = (SortMode)store_load_sort();
   s_auto_return = store_load_autoreturn();
   s_running_first = store_load_runningfirst();
   s_idle_timeout_sec = store_load_idleexit();
+  s_launch_sync = store_load_launchsync();
 #ifdef SCREENSHOT_FIXTURES
-  if (s_count == 0) {
-    s_count = 3;
-    memset(s_timers, 0, sizeof(s_timers));
-    strcpy(s_timers[0].name, "Egg"); s_timers[0].duration = 300; s_timers[0].state = TS_RUNNING; s_timers[0].end_time = time(NULL) + 184; s_timers[0].last_used = time(NULL);
-    strcpy(s_timers[1].name, "Tea"); s_timers[1].duration = 120; s_timers[1].state = TS_PAUSED; s_timers[1].remaining = 75; s_timers[1].last_used = time(NULL) - 10;
-    strcpy(s_timers[2].name, "Laundry"); s_timers[2].duration = 3600; s_timers[2].state = TS_DONE; s_timers[2].remaining = 0; s_timers[2].last_used = 0;
+  if (s_template_count == 0) {
+    s_template_count = 3;
+    memset(s_templates, 0, sizeof(s_templates));
+    strcpy(s_templates[0].name, "Egg"); s_templates[0].duration = 300; s_templates[0].state = TS_IDLE; s_templates[0].remaining = 300;
+    strcpy(s_templates[1].name, "Tea"); s_templates[1].duration = 120; s_templates[1].state = TS_IDLE; s_templates[1].remaining = 120;
+    strcpy(s_templates[2].name, "Laundry"); s_templates[2].duration = 3600; s_templates[2].state = TS_IDLE; s_templates[2].remaining = 3600;
+  }
+  if (s_instance_count == 0) {
+    s_instance_count = 2;
+    memset(s_instances, 0, sizeof(s_instances));
+    strcpy(s_instances[0].name, "Egg"); s_instances[0].duration = 300; s_instances[0].state = TS_RUNNING; s_instances[0].end_time = time(NULL) + 184; s_instances[0].last_used = time(NULL);
+    strcpy(s_instances[1].name, "Tea"); s_instances[1].duration = 120; s_instances[1].state = TS_PAUSED; s_instances[1].remaining = 75; s_instances[1].last_used = time(NULL) - 10;
   }
 #endif
   // If launched by a wakeup, the firing event was already consumed; sweep now.
@@ -1048,6 +1228,10 @@ static void init(void) {
     .appear = idle_appear, .disappear = idle_disappear });
   window_stack_push(s_window, true);
   rebuild_order();
+  if (s_menu) {
+    menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = MAIN_SECTION_TEMPLATES, .row = 0 },
+      MenuRowAlignTop, false);
+  }
   ensure_ticking();
 
   // A timer finished since the app last closed -> show the alarm over the list and
@@ -1066,7 +1250,6 @@ static void init(void) {
 static void deinit(void) {
   if (s_tick) { app_timer_cancel(s_tick); }
   idle_cancel();
-  if (s_new_timer_idx >= 0 && s_new_timer_idx < s_count) { remove_timer_at(s_new_timer_idx); }
   persist_all();
   rearm_wakeup();   // ensure the closed-app wakeup reflects final state
   if (s_confirm_window) { window_destroy(s_confirm_window); }

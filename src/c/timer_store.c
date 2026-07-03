@@ -4,17 +4,13 @@
 #include "timer_store.h"
 #include <string.h>
 
-// One Timer per persist key (PERSIST_KEY_TIMER_BASE+i). A packed blob can't be
-// used: persist_write_data caps at 256 B/key and 16 Timers (~1 KB) exceed that.
-int store_load(Timer *out) {
-  if (!persist_exists(PERSIST_KEY_SCHEMA) ||
-      persist_read_int(PERSIST_KEY_SCHEMA) != STORE_SCHEMA) { return 0; }
-  int count = persist_exists(PERSIST_KEY_COUNT) ? persist_read_int(PERSIST_KEY_COUNT) : 0;
+static int load_list(int count_key, int base_key, Timer *out) {
+  int count = persist_exists(count_key) ? persist_read_int(count_key) : 0;
   if (count > MAX_TIMERS) { count = MAX_TIMERS; }
   if (count < 0) { count = 0; }
   for (int i = 0; i < count; i++) {
-    if (persist_exists(PERSIST_KEY_TIMER_BASE + i)) {
-      persist_read_data(PERSIST_KEY_TIMER_BASE + i, &out[i], sizeof(Timer));
+    if (persist_exists(base_key + i)) {
+      persist_read_data(base_key + i, &out[i], sizeof(Timer));
     } else {
       memset(&out[i], 0, sizeof(Timer));
     }
@@ -22,17 +18,86 @@ int store_load(Timer *out) {
   return count;
 }
 
-void store_save(const Timer *t, int count) {
+static void save_list(int count_key, int base_key, const Timer *t, int count) {
   if (count > MAX_TIMERS) { count = MAX_TIMERS; }
-  persist_write_int(PERSIST_KEY_SCHEMA, STORE_SCHEMA);
-  persist_write_int(PERSIST_KEY_COUNT, count);
+  persist_write_int(count_key, count);
   for (int i = 0; i < count; i++) {
-    persist_write_data(PERSIST_KEY_TIMER_BASE + i, &t[i], sizeof(Timer));
+    persist_write_data(base_key + i, &t[i], sizeof(Timer));
   }
   // drop any stale keys beyond the new count
   for (int i = count; i < MAX_TIMERS; i++) {
+    if (persist_exists(base_key + i)) { persist_delete(base_key + i); }
+  }
+}
+
+static int load_legacy(Timer *templates, Timer *instances) {
+  int count = persist_exists(PERSIST_KEY_COUNT) ? persist_read_int(PERSIST_KEY_COUNT) : 0;
+  if (count > MAX_TIMERS) { count = MAX_TIMERS; }
+  if (count < 0) { count = 0; }
+  int tc = 0;
+  int ic = 0;
+  for (int i = 0; i < count; i++) {
+    Timer t;
+    memset(&t, 0, sizeof(t));
+    if (persist_exists(PERSIST_KEY_TIMER_BASE + i)) {
+      persist_read_data(PERSIST_KEY_TIMER_BASE + i, &t, sizeof(Timer));
+    }
+    Timer tpl = t;
+    tpl.state = TS_IDLE;
+    tpl.end_time = 0;
+    tpl.remaining = tpl.duration >= 1 ? tpl.duration : 1;
+    tpl.custom = false;
+    if (tc < MAX_TIMERS) { templates[tc++] = tpl; }
+    if (t.state != TS_IDLE && ic < MAX_TIMERS) { instances[ic++] = t; }
+  }
+  return tc | (ic << 16);
+}
+
+static void ensure_schema(void) {
+  persist_write_int(PERSIST_KEY_SCHEMA, STORE_SCHEMA);
+}
+
+static void migrate_legacy_if_needed(void) {
+  if (!persist_exists(PERSIST_KEY_SCHEMA)) { return; }
+  if (persist_read_int(PERSIST_KEY_SCHEMA) == STORE_SCHEMA) { return; }
+  Timer templates[MAX_TIMERS];
+  Timer instances[MAX_TIMERS];
+  memset(templates, 0, sizeof(templates));
+  memset(instances, 0, sizeof(instances));
+  int packed = load_legacy(templates, instances);
+  int tc = packed & 0xffff;
+  int ic = (packed >> 16) & 0xffff;
+  ensure_schema();
+  save_list(PERSIST_KEY_TEMPLATE_COUNT, PERSIST_KEY_TEMPLATE_BASE, templates, tc);
+  save_list(PERSIST_KEY_INSTANCE_COUNT, PERSIST_KEY_INSTANCE_BASE, instances, ic);
+  if (persist_exists(PERSIST_KEY_COUNT)) { persist_delete(PERSIST_KEY_COUNT); }
+  for (int i = 0; i < MAX_TIMERS; i++) {
     if (persist_exists(PERSIST_KEY_TIMER_BASE + i)) { persist_delete(PERSIST_KEY_TIMER_BASE + i); }
   }
+}
+
+int store_load_templates(Timer *out) {
+  migrate_legacy_if_needed();
+  if (!persist_exists(PERSIST_KEY_SCHEMA) ||
+      persist_read_int(PERSIST_KEY_SCHEMA) != STORE_SCHEMA) { return 0; }
+  return load_list(PERSIST_KEY_TEMPLATE_COUNT, PERSIST_KEY_TEMPLATE_BASE, out);
+}
+
+void store_save_templates(const Timer *t, int count) {
+  ensure_schema();
+  save_list(PERSIST_KEY_TEMPLATE_COUNT, PERSIST_KEY_TEMPLATE_BASE, t, count);
+}
+
+int store_load_instances(Timer *out) {
+  migrate_legacy_if_needed();
+  if (!persist_exists(PERSIST_KEY_SCHEMA) ||
+      persist_read_int(PERSIST_KEY_SCHEMA) != STORE_SCHEMA) { return 0; }
+  return load_list(PERSIST_KEY_INSTANCE_COUNT, PERSIST_KEY_INSTANCE_BASE, out);
+}
+
+void store_save_instances(const Timer *t, int count) {
+  ensure_schema();
+  save_list(PERSIST_KEY_INSTANCE_COUNT, PERSIST_KEY_INSTANCE_BASE, t, count);
 }
 
 int32_t store_load_wakeup_id(void) {
@@ -78,4 +143,13 @@ int store_load_idleexit(void) {
 
 void store_save_idleexit(int seconds) {
   persist_write_int(PERSIST_KEY_IDLEEXIT, seconds);
+}
+
+bool store_load_launchsync(void) {
+  if (!persist_exists(PERSIST_KEY_LAUNCHSYNC)) { return false; }   // default OFF
+  return persist_read_bool(PERSIST_KEY_LAUNCHSYNC);
+}
+
+void store_save_launchsync(bool on) {
+  persist_write_bool(PERSIST_KEY_LAUNCHSYNC, on);
 }
