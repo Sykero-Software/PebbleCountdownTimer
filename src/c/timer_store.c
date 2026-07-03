@@ -60,8 +60,11 @@ static void ensure_schema(void) {
 static void migrate_legacy_if_needed(void) {
   if (!persist_exists(PERSIST_KEY_SCHEMA)) { return; }
   if (persist_read_int(PERSIST_KEY_SCHEMA) == STORE_SCHEMA) { return; }
-  Timer templates[MAX_TIMERS];
-  Timer instances[MAX_TIMERS];
+  // static, NOT on the stack: two Timer[MAX_TIMERS] arrays are ~2.3 KB and would
+  // overflow the small (~2 KB) Pebble app stack -> hard-fault on hardware. This runs
+  // once, on the single-threaded event loop, so static is safe (as the inbox handler does).
+  static Timer templates[MAX_TIMERS];
+  static Timer instances[MAX_TIMERS];
   memset(templates, 0, sizeof(templates));
   memset(instances, 0, sizeof(instances));
   int packed = load_legacy(templates, instances);

@@ -169,7 +169,7 @@ static void reload_ui(void) {
 }
 
 static void ensure_ticking(void);   // defined below; used by the alarm handlers
-static void open_detail_window(int timer_idx, int template_idx);  // defined below; used by the alarm snooze
+static void open_detail_window(int timer_idx, int template_idx, bool new_template);  // defined below; used by the alarm snooze
 static void remove_timer_at(int idx);           // defined below; used by stop paths
 static void remove_template_at(int idx);        // defined below; used by template-delete path
 
@@ -253,7 +253,8 @@ static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
   if (idx >= 0 && idx < s_instance_count) {
     tc_extend(&s_instances[idx], 60, now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
-    open_detail_window(idx, -1);
+    s_pending_main_select_idx = -1;   // re-targeting the detail to the snoozed timer
+    open_detail_window(idx, -1, false);
     window_stack_remove(s_alarm_window, false);
   } else {
     window_stack_remove(s_alarm_window, true);
@@ -602,6 +603,7 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     }
     case DACT_STOP:                     // remove this instance
       remove_timer_at(idx);
+      s_pending_main_select_idx = -1;   // the row we came from is gone; don't select a shifted one
       persist_all(); rearm_wakeup(); reload_ui();
       if (s_auto_return) { close_to_watchface(); }
       else { window_stack_remove(s_detail_window, true); }
@@ -741,10 +743,13 @@ static void open_delete_confirm(void) {
   window_stack_push(s_del_window, true);
 }
 
-static void open_detail_window(int timer_idx, int template_idx) {
+static void open_detail_window(int timer_idx, int template_idx, bool new_template) {
   s_detail_idx = timer_idx;
   s_detail_template_idx = template_idx;
-  if (timer_idx < 0) { s_detail_new_template = true; }
+  // Authoritative: a reused (idempotent) detail window must NOT inherit a stale draft
+  // flag. Without this, an alarm-snooze that re-targets an open "+ New timer" draft to a
+  // real timer would keep draft mode -> its "Cancel" would silently delete the real timer.
+  s_detail_new_template = new_template;
   if (!s_detail_window) {
     s_detail_window = window_create();
     window_set_window_handlers(s_detail_window, (WindowHandlers){
@@ -799,6 +804,7 @@ static void ml_draw_timer_row(GContext *gctx, const Layer *cell, MenuIndex *ci, 
     menu_cell_basic_draw(gctx, cell, "No timers", "Configure on your phone", NULL);
     return;
   }
+  if (!t) { return; }   // defensive: only the empty-state call above passes NULL
   // Tint each row by state so running/paused/done stand out at a glance (color
   // displays only; b&w falls back to the standard white/black look). The selected
   // row uses a DARK shade of the same hue + white text so it still reads as the
@@ -963,7 +969,9 @@ static int start_instance_from_template(int template_idx) {
     start_secs -= launch_elapsed_s();
     if (start_secs < 1) { start_secs = 1; }
   }
-  s_instances[idx].duration = start_secs;
+  // Keep duration at the template's full length: the launch-sync offset applies to THIS
+  // run only (via remaining), so a later re-run (Start on a finished instance) restarts
+  // from the full template duration, not the shortened offset.
   s_instances[idx].remaining = start_secs;
   tc_start(&s_instances[idx], now_s());
   return idx;
@@ -974,11 +982,8 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
   if (ci->section == MAIN_SECTION_TEMPLATES) {
     if (ci->row == 0) {
       if (s_instance_count >= MAX_TIMERS) { return; }
-      int32_t secs = 60;
-      if (s_launch_sync) {
-        secs -= launch_elapsed_s();
-        if (secs < 1) { secs = 1; }
-      }
+      int32_t secs = 60;   // a brand-new manual timer runs its full length; launch-sync
+                           // offsets only TEMPLATE starts, not the "+ New timer" draft.
       int idx = s_instance_count++;
       Timer *t = &s_instances[idx];
       memset(t, 0, sizeof(*t));
@@ -989,9 +994,8 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
       tc_start(t, now_s());
       persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
       s_pending_main_select_idx = idx;
-      s_detail_new_template = true;
       s_opening_with_modified = true;
-      open_detail_window(idx, -1);
+      open_detail_window(idx, -1, true);
       return;
     }
     if (ci->row > s_template_count) { return; }
@@ -1012,7 +1016,7 @@ static void ml_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     if (s_auto_return) { show_start_confirmation(idx); }
     return;
   }
-  open_detail_window(idx, -1);
+  open_detail_window(idx, -1, false);
 }
 
 // Long SELECT opens the detail window for ANY timer (short SELECT still starts an
@@ -1031,11 +1035,11 @@ static void ml_select_long(MenuLayer *ml, MenuIndex *ci, void *ctx) {
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
     s_pending_main_select_idx = idx;
     s_opening_with_modified = true;
-    open_detail_window(idx, t_idx);
+    open_detail_window(idx, t_idx, false);
     return;
   }
   if (ci->section != MAIN_SECTION_RUNNING || ci->row >= s_instance_count) { return; }
-  open_detail_window(s_instance_order[ci->row], -1);
+  open_detail_window(s_instance_order[ci->row], -1, false);
 }
 
 // ---- AppMessage inbox: a TimerConfig string + SortOrder int -> reconcile ----
@@ -1081,6 +1085,14 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
   Tuple *cfg = dict_find(iter, MESSAGE_KEY_TimerConfig);
   if (cfg) {
+    // If a template-origin detail is open, snapshot which template it addresses. The
+    // rebuild below can reorder/resize s_templates, and s_detail_template_idx is a bare
+    // position — left stale, its Delete would remove the WRONG template on watch+phone.
+    char prev_name[NAME_LEN + 1]; int32_t prev_dur = -1;
+    if (s_detail_template_idx >= 0 && s_detail_template_idx < s_template_count) {
+      snprintf(prev_name, sizeof(prev_name), "%s", s_templates[s_detail_template_idx].name);
+      prev_dur = s_templates[s_detail_template_idx].duration;
+    }
     static Timer parsed[MAX_TIMERS];
     int pn = tc_parse_config(cfg->value->cstring, parsed, MAX_TIMERS);
     memcpy(s_templates, parsed, sizeof(Timer) * (size_t)pn);
@@ -1090,6 +1102,14 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
       s_templates[i].remaining = s_templates[i].duration;
       s_templates[i].end_time = 0;
       s_templates[i].custom = false;
+    }
+    // Drop the template-origin pointer unless it still names the same template (so the
+    // common launch-time config echo, which is identical, keeps a valid Delete target).
+    if (prev_dur >= 0 &&
+        (s_detail_template_idx >= s_template_count ||
+         s_templates[s_detail_template_idx].duration != prev_dur ||
+         strcmp(s_templates[s_detail_template_idx].name, prev_name) != 0)) {
+      s_detail_template_idx = -1;
     }
     sweep_expiries();
     persist_all(); rearm_wakeup(); ensure_ticking();
@@ -1226,8 +1246,8 @@ static void init(void) {
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload,
     .appear = idle_appear, .disappear = idle_disappear });
+  rebuild_order();                  // fill the display order BEFORE the first paint
   window_stack_push(s_window, true);
-  rebuild_order();
   if (s_menu) {
     menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = MAIN_SECTION_TEMPLATES, .row = 0 },
       MenuRowAlignTop, false);
