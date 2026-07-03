@@ -452,9 +452,10 @@ static void dl_rebuild_actions(void) {
   Timer *t = &s_instances[s_detail_idx];
   DetailAction raw[7];
   int n = tc_detail_actions(t->state, false, raw);
+  // tc_detail_actions is called with changed=false, so it never emits DACT_SAVE_START
+  // ("Start & Save" is a template-model concept that doesn't apply to instances).
   s_detail_act_count = 0;
   for (int i = 0; i < n; i++) {
-    if (raw[i] == DACT_SAVE_START) { continue; }
     if (s_detail_template_idx < 0 && raw[i] == DACT_DELETE) { continue; }
     s_detail_acts[s_detail_act_count++] = raw[i];
   }
@@ -480,7 +481,7 @@ static const char *dl_action_label(DetailAction a) {
     case DACT_STOP:       return "Stop";
     case DACT_PAUSE:      return "Pause";
     case DACT_START:      return "Start";
-    case DACT_SAVE_START: return "Start & Save";
+    case DACT_SAVE_START: return "";     // never shown for instances; kept for -Werror=switch
     case DACT_PLUS:       return "+1 min";
     case DACT_MINUS:      return "-1 min";
     case DACT_DELETE:     return "Delete";
@@ -536,7 +537,6 @@ static void dl_draw_row(GContext *gctx, const Layer *cell, MenuIndex *ci, void *
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
-static void save_as_new_and_start(int32_t secs);  // defined below
 static void open_delete_confirm(void);             // defined below (delete path)
 static void show_start_confirmation(int idx);      // defined below (auto-return tail)
 static void send_delete_timer(int32_t idx);        // defined below (template delete sync)
@@ -596,11 +596,8 @@ static void dl_select(MenuLayer *ml, MenuIndex *ci, void *ctx) {
       if (s_auto_return) { show_start_confirmation(idx); }   // flash, then pop to watchface
       else { menu_layer_reload_data(s_detail_menu); }
       break;
-    case DACT_SAVE_START: {             // only present when the time was tuned -> never a dup
-      int32_t rem = tc_remaining_now(t, now_s());
-      save_as_new_and_start(rem >= 1 ? rem : t->duration);
-      break;
-    }
+    case DACT_SAVE_START:               // never emitted for instances (changed=false);
+      break;                            // handled only to satisfy -Werror=switch
     case DACT_STOP:                     // remove this instance
       remove_timer_at(idx);
       s_pending_main_select_idx = -1;   // the row we came from is gone; don't select a shifted one
@@ -1159,32 +1156,6 @@ static void remove_template_at(int idx) {
   s_template_count--;
 }
 
-// Create a NEW unnamed timer of `secs`, started now, appended at the end of the
-// list (so a later config reconcile aligns the phone's appended entry to this
-// running row by position). Persist, send AddTimer, then apply the normal start
-// tail (confirmation + auto-return).
-static void save_as_new_and_start(int32_t secs) {
-  if (s_instance_count >= MAX_TIMERS) {
-    return;   // List full: nothing to create. (Keep it simple — no new row.)
-  }
-  if (secs < 1) { secs = 1; }
-  int idx = s_instance_count;
-  Timer *t = &s_instances[idx];
-  memset(t, 0, sizeof(*t));
-  t->name[0] = 0;
-  t->duration = secs;
-  t->remaining = secs;
-  t->state = TS_IDLE;
-  t->custom = true;
-  tc_start(t, now_s());            // -> RUNNING, end_time = now + secs
-  s_instance_count++;
-  persist_all(); rearm_wakeup(); ensure_ticking();
-  reload_ui();
-  select_timer_row(idx);
-  if (s_auto_return) { show_start_confirmation(idx); }   // flash -> watchface
-  else { window_stack_remove(s_detail_window, true); }   // back to the list
-}
-
 // ---- window ----
 static void window_load(Window *w) {
   Layer *root = window_get_root_layer(w);
@@ -1249,7 +1220,10 @@ static void init(void) {
   rebuild_order();                  // fill the display order BEFORE the first paint
   window_stack_push(s_window, true);
   if (s_menu) {
-    menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = MAIN_SECTION_TEMPLATES, .row = 0 },
+    // Land on the first RUNNING instance when any exist, so live countdowns are visible
+    // on launch instead of being scrolled off above "+ New timer"; else on "+ New timer".
+    MainSection sec = (s_instance_count > 0) ? MAIN_SECTION_RUNNING : MAIN_SECTION_TEMPLATES;
+    menu_layer_set_selected_index(s_menu, (MenuIndex){ .section = sec, .row = 0 },
       MenuRowAlignTop, false);
   }
   ensure_ticking();
