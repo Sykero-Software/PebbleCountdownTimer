@@ -49,6 +49,20 @@ const config = [
           { label: '30 seconds', value: '30' },
           { label: '60 seconds', value: '60' },
         ] },
+      { type: 'select', messageKey: 'SnoozeSec',
+        label: 'Quick snooze (Up button)',
+        description: 'When a timer finishes, the Up button snoozes it for this long. Off hides the Up snooze — you can still snooze from the Select menu.',
+        defaultValue: '60', options: [
+          { label: 'Off',    value: '0' },
+          { label: '1 min',  value: '60' },
+          { label: '3 min',  value: '180' },
+          { label: '5 min',  value: '300' },
+          { label: '10 min', value: '600' },
+          { label: '15 min', value: '900' },
+          { label: '30 min', value: '1800' },
+          { label: '45 min', value: '2700' },
+          { label: '60 min', value: '3600' },
+        ] },
     ],
   },
   {
@@ -72,9 +86,10 @@ const config = [
         '• <b>Delete</b> — remove the timer (asks to confirm).' },
       { type: 'text', defaultValue:
         '<b>When a timer reaches zero</b><br>' +
-        '• <b>Up</b> — +1 min (snooze). ' +
+        '• <b>Up</b> — quick snooze (the length set above). ' +
+        '• <b>Select</b> — choose a snooze length from a menu. ' +
         '• <b>Down</b> — Stop. ' +
-        '• <b>Back</b> — snooze.' },
+        '• <b>Back</b> — snooze (or Stop when quick snooze is Off).' },
     ],
   },
   { type: 'submit', defaultValue: 'Save' },
