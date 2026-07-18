@@ -81,3 +81,12 @@ int store_load_idleexit(void) {
 void store_save_idleexit(int seconds) {
   persist_write_int(PERSIST_KEY_IDLEEXIT, seconds);
 }
+
+int store_load_snooze(void) {
+  if (!persist_exists(PERSIST_KEY_SNOOZE)) { return 60; }   // default 1 min ON
+  return persist_read_int(PERSIST_KEY_SNOOZE);
+}
+
+void store_save_snooze(int seconds) {
+  persist_write_int(PERSIST_KEY_SNOOZE, seconds);
+}

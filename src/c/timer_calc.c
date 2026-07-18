@@ -69,9 +69,9 @@ void tc_format_snooze(char *buf, size_t n, int32_t secs, bool with_plus) {
   const char *plus = with_plus ? "+" : "";
   const char *minu = with_plus ? "Min" : "min";
   if (secs >= 3600 && secs % 3600 == 0) {
-    snprintf(buf, n, "%s%d h", plus, secs / 3600);
+    snprintf(buf, n, "%s%d h", plus, (int)(secs / 3600));
   } else {
-    snprintf(buf, n, "%s%d %s", plus, secs / 60, minu);
+    snprintf(buf, n, "%s%d %s", plus, (int)(secs / 60), minu);
   }
 }
 

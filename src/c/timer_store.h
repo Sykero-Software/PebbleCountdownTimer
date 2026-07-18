@@ -11,6 +11,7 @@
 #define PERSIST_KEY_AUTORETURN 5
 #define PERSIST_KEY_RUNNINGFIRST 6
 #define PERSIST_KEY_IDLEEXIT 7       // idle auto-exit timeout, seconds (0 = off)
+#define PERSIST_KEY_SNOOZE 8         // quick-snooze length, seconds (0 = Off/no UP snooze)
 #define PERSIST_KEY_TIMER_BASE 100   // timer i -> key 100+i (one Timer per key; 256B/key cap)
 #define STORE_SCHEMA 2
 
@@ -33,3 +34,6 @@ void store_save_runningfirst(bool on);
 // Idle auto-exit timeout in seconds (defaults to 15 when unset; 0 = off).
 int store_load_idleexit(void);
 void store_save_idleexit(int seconds);
+// Quick-snooze length in seconds (defaults to 60 when unset; 0 = Off).
+int store_load_snooze(void);
+void store_save_snooze(int seconds);

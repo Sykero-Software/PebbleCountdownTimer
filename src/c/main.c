@@ -17,6 +17,7 @@ static TextLayer *s_alarm_lbl_down;  // "Stop"  next to the DOWN button
 static int s_alarm_idx = -1;                 // config index the alarm screen is for
 static char s_alarm_title_buf[NAME_LEN + 1]; // big name (or time if unnamed)
 static char s_alarm_sub_buf[48];
+static char s_alarm_up_buf[12];              // UP-button quick-snooze label ("+45 Min" / "+1 h")
 
 // Repeating "alarm clock" buzz: re-fire alarm_vibrate() on a timer until the
 // user dismisses, capped at ALARM_BUZZ_MAX_S so an unattended watch stops
@@ -72,6 +73,10 @@ static void close_to_watchface(void) {
 static int       s_idle_timeout_sec; // seconds; 0 disables
 static AppTimer *s_idle_timer;
 static bool      s_config_open = false; // true while the phone config page is open (pauses idle)
+
+// Quick-snooze length for the alarm UP button, seconds; 0 = Off (UP/BACK snooze
+// disabled, label hidden). Loaded from persist on init, updated from the inbox.
+static int       s_snooze_secs = 60;
 
 static void idle_cancel(void) {
   if (s_idle_timer) { app_timer_cancel(s_idle_timer); s_idle_timer = NULL; }
@@ -210,12 +215,13 @@ static void alarm_stop(ClickRecognizerRef rec, void *ctx) {
 }
 
 static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
-  // Snooze: run the finished timer for 1 more minute, dismiss the alarm, and land on
-  // that timer's own detail window. Push the detail window over the alarm first, then
+  // Quick snooze: run the finished timer for the configured length, dismiss the alarm, and
+  // land on that timer's own detail window. Push the detail window over the alarm first, then
   // silently drop the alarm from beneath it (no flash back to the list).
+  if (s_snooze_secs < 1) { return; }   // Off: UP/BACK quick snooze disabled (menu still works)
   int idx = s_alarm_idx;
   if (idx >= 0 && idx < s_count) {
-    tc_extend(&s_timers[idx], 60, now_s());
+    tc_extend(&s_timers[idx], s_snooze_secs, now_s());
     persist_all(); rearm_wakeup(); ensure_ticking(); reload_ui();
     open_detail_window(idx);
     window_stack_remove(s_alarm_window, false);
@@ -224,10 +230,50 @@ static void alarm_add_minute(ClickRecognizerRef rec, void *ctx) {
   }
 }
 
+// SELECT on the alarm -> pick a snooze length from a menu -> snooze that timer and exit
+// to the watchface. Labels/seconds mirror the Clay `SnoozeSec` option list (kept in sync
+// by hand; both are short literal lists). The root level is freed in did_close so a
+// dismiss-without-pick (Back) doesn't leak it.
+static const int32_t SNOOZE_MENU_SECS[] = { 60, 180, 300, 600, 900, 1800, 2700, 3600 };
+static const char *const SNOOZE_MENU_LABELS[] = {
+  "1 min", "3 min", "5 min", "10 min", "15 min", "30 min", "45 min", "1 h" };
+
+static void snooze_menu_perform(ActionMenu *menu, const ActionMenuItem *item, void *ctx) {
+  int32_t secs = (int32_t)(uintptr_t)action_menu_item_get_action_data(item);
+  if (s_alarm_idx >= 0 && s_alarm_idx < s_count && secs > 0) {
+    tc_extend(&s_timers[s_alarm_idx], secs, now_s());
+    persist_all(); rearm_wakeup();
+  }
+  close_to_watchface();   // exit after the pick (the menu + alarm are popped by the exit)
+}
+
+static void snooze_menu_did_close(ActionMenu *menu, const ActionMenuItem *item, void *ctx) {
+  action_menu_hierarchy_destroy((const ActionMenuLevel *)ctx, NULL, NULL);
+}
+
+static void alarm_open_snooze_menu(ClickRecognizerRef rec, void *ctx) {
+  ActionMenuLevel *root = action_menu_level_create(ARRAY_LENGTH(SNOOZE_MENU_SECS));
+  for (unsigned i = 0; i < ARRAY_LENGTH(SNOOZE_MENU_SECS); i++) {
+    action_menu_level_add_action(root, SNOOZE_MENU_LABELS[i], snooze_menu_perform,
+                                 (void *)(uintptr_t)SNOOZE_MENU_SECS[i]);
+  }
+  ActionMenuConfig cfg = {
+    .root_level = root,
+    .context = root,
+    .did_close = snooze_menu_did_close,
+    .colors = { .background = GColorRed, .foreground = GColorWhite },
+    .align = ActionMenuAlignCenter,
+  };
+  action_menu_open(&cfg);
+}
+
 static void alarm_click_config(void *ctx) {
-  window_single_click_subscribe(BUTTON_ID_DOWN, alarm_stop);        // Stop: reset + dismiss
-  window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);    // +1 Min: snooze + dismiss
-  window_single_click_subscribe(BUTTON_ID_BACK, alarm_add_minute);  // Back = snooze (matches stock)
+  window_single_click_subscribe(BUTTON_ID_DOWN, alarm_stop);           // Stop: reset + dismiss
+  window_single_click_subscribe(BUTTON_ID_UP, alarm_add_minute);       // quick snooze + dismiss (no-op when Off)
+  window_single_click_subscribe(BUTTON_ID_SELECT, alarm_open_snooze_menu); // choose a snooze length
+  // Back = quick snooze (matches stock); when quick snooze is Off, Back dismisses (Stop).
+  window_single_click_subscribe(BUTTON_ID_BACK,
+      s_snooze_secs >= 1 ? alarm_add_minute : alarm_stop);
 }
 
 // Pick the largest title font whose word-wrapped layout fits within box_h (the
@@ -253,6 +299,19 @@ static GFont alarm_title_font(const char *text, int box_w, int box_h, GSize *out
     if (sz.h <= box_h) { break; }   // largest font that fits vertically -> use it
   }
   return chosen;
+}
+
+// Set the UP-button label from the configured quick-snooze length ("+5 Min" / "+1 h").
+// When snooze is Off (s_snooze_secs < 1) the label is blank and the quick snooze is
+// disabled (see alarm_add_minute). Safe to call before the layer exists (no-op).
+static void alarm_set_up_label(void) {
+  if (!s_alarm_lbl_up) { return; }
+  if (s_snooze_secs >= 1) {
+    tc_format_snooze(s_alarm_up_buf, sizeof(s_alarm_up_buf), s_snooze_secs, true);
+    text_layer_set_text(s_alarm_lbl_up, s_alarm_up_buf);
+  } else {
+    text_layer_set_text(s_alarm_lbl_up, "");
+  }
 }
 
 // (Re)compute the title layer's font + frame from the current name. The available
@@ -297,8 +356,8 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text_color(s_alarm_lbl_up, GColorWhite);
   text_layer_set_font(s_alarm_lbl_up, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
   text_layer_set_text_alignment(s_alarm_lbl_up, GTextAlignmentRight);
-  text_layer_set_text(s_alarm_lbl_up, "+1 Min");
   layer_add_child(root, text_layer_get_layer(s_alarm_lbl_up));
+  alarm_set_up_label();   // label from the configured quick-snooze length (blank when Off)
 
   // Title — large bold, centred in the band between the +1 Min and Stop labels
   // (timer name, or time if unnamed). The font auto-shrinks for long, wrapping
@@ -867,6 +926,13 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     store_save_idleexit(isec);
     idle_reset();
   }
+  Tuple *sn = dict_find(iter, MESSAGE_KEY_SnoozeSec);
+  int snsec = idle_read_seconds(sn);   // reuse the type-tolerant CString/int parser
+  if (snsec >= 0) {
+    s_snooze_secs = snsec;
+    store_save_snooze(snsec);
+    if (window_stack_get_top_window() == s_alarm_window) { alarm_set_up_label(); }
+  }
   // Pause the idle auto-exit while the phone config page is open (no watch buttons are
   // pressed during config, so the idle timer would otherwise fire and kill the app —
   // and PKJS with it — closing the config page and losing unsaved changes).
@@ -1024,6 +1090,7 @@ static void init(void) {
   s_auto_return = store_load_autoreturn();
   s_running_first = store_load_runningfirst();
   s_idle_timeout_sec = store_load_idleexit();
+  s_snooze_secs = store_load_snooze();
 #ifdef SCREENSHOT_FIXTURES
   if (s_count == 0) {
     s_count = 3;
