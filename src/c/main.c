@@ -340,7 +340,11 @@ static void trigger_alarm(int idx, int count) {
   if (t->name[0]) {
     snprintf(s_alarm_title_buf, sizeof(s_alarm_title_buf), "%s", t->name);
   } else {
-    tc_format_remaining(s_alarm_title_buf, sizeof(s_alarm_title_buf), t->duration);
+    // Show the length this run actually counted down (run_secs), which may differ from the
+    // template `duration` when the start time was tuned with +/- before starting. Fall back
+    // to `duration` for a legacy timer that predates run_secs (run_secs == 0).
+    int32_t shown = t->run_secs >= 1 ? t->run_secs : t->duration;
+    tc_format_remaining(s_alarm_title_buf, sizeof(s_alarm_title_buf), shown);
   }
   if (count > 1) {
     snprintf(s_alarm_sub_buf, sizeof(s_alarm_sub_buf), "+%d more", count - 1);

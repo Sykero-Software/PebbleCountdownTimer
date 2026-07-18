@@ -119,6 +119,10 @@ void tc_start(Timer *t, int64_t now) {
   // full duration when remaining is unset/zero, so a plain Start is unchanged.
   int32_t rem = (t->state == TS_RUNNING) ? t->duration : t->remaining;
   if (rem < 1) { rem = t->duration; }
+  // A fresh start/restart (IDLE/DONE/RUNNING) counts down `rem` from scratch, so that IS
+  // the run length. A pause-resume (PAUSED) counts down the leftover but the run length is
+  // still the original — keep the recorded run_secs (fall back to `rem` if never recorded).
+  if (t->state != TS_PAUSED || t->run_secs < 1) { t->run_secs = rem; }
   t->end_time = now + rem;
   t->state = TS_RUNNING;
   t->last_used = now;
@@ -144,12 +148,15 @@ void tc_reset(Timer *t, int64_t now) {
 void tc_extend(Timer *t, int32_t secs, int64_t now) {
   t->state = TS_RUNNING;
   t->end_time = now + secs;
+  t->run_secs = secs;   // a snooze restarts the countdown for `secs` -> that's the new run length
   t->last_used = now;
 }
 
 void tc_add(Timer *t, int32_t secs, int64_t now) {
   if (t->state == TS_RUNNING) {
     t->end_time += secs;
+    t->run_secs += secs;   // a live +/- grows this run's total length
+    if (t->run_secs < 1) { t->run_secs = 1; }
   } else if (t->state == TS_PAUSED) {
     t->remaining += secs;
     if (t->remaining < 0) { t->remaining = 0; }

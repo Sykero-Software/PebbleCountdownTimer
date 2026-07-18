@@ -213,6 +213,32 @@ int main(void) {
          acts[2] == DACT_SAVE_START && acts[3] == DACT_PLUS &&
          acts[4] == DACT_MINUS && acts[5] == DACT_DELETE);
 
+  // --- run_secs: the length the current run was started with (survives expiry) ---
+  // Reported bug: a template whose time was tuned with +/- before starting showed the
+  // TEMPLATE length on the finish alarm, not the length it actually ran. run_secs records
+  // the real run length so the alarm (and any run-length readout) is correct.
+  Timer rs; memset(&rs, 0, sizeof(rs));
+  rs.duration = 300; rs.remaining = 480; rs.state = TS_IDLE;   // 5-min template tuned to 8 min
+  tc_start(&rs, 1000);
+  assert(rs.run_secs == 480 && rs.end_time == 1480);           // ran the tuned 8 min, not the 5-min template
+  assert(tc_check_expiry(&rs, 1480) == true);
+  assert(rs.run_secs == 480 && rs.remaining == 0);             // still 8 min after expiry (remaining is zeroed)
+
+  // Plain (untuned) start records the full duration.
+  Timer rs2; memset(&rs2, 0, sizeof(rs2));
+  rs2.duration = 300; rs2.remaining = 300; rs2.state = TS_IDLE;
+  tc_start(&rs2, 0);   assert(rs2.run_secs == 300);
+  // Resume from pause keeps the original run length (does not shrink to the leftover).
+  tc_pause(&rs2, 100); assert(rs2.state == TS_PAUSED);
+  tc_start(&rs2, 200); assert(rs2.run_secs == 300);            // still 5 min, not the 200s leftover
+  // A live +/- while running grows the run length too.
+  tc_add(&rs2, 60, 210); assert(rs2.run_secs == 360);
+
+  // Snooze via tc_extend records the snooze length as the new run length.
+  Timer rs3; memset(&rs3, 0, sizeof(rs3));
+  rs3.duration = 300; rs3.state = TS_DONE;
+  tc_extend(&rs3, 120, 500); assert(rs3.run_secs == 120);
+
   printf("All timer_calc tests passed\n");
   return 0;
 }

@@ -13,10 +13,12 @@ int store_load(Timer *out) {
   if (count > MAX_TIMERS) { count = MAX_TIMERS; }
   if (count < 0) { count = 0; }
   for (int i = 0; i < count; i++) {
+    // Zero the slot first so a shorter legacy blob (written before a trailing field
+    // like run_secs was added) leaves the new field at 0 rather than reading garbage;
+    // persist_read_data only overwrites the bytes actually stored.
+    memset(&out[i], 0, sizeof(Timer));
     if (persist_exists(PERSIST_KEY_TIMER_BASE + i)) {
       persist_read_data(PERSIST_KEY_TIMER_BASE + i, &out[i], sizeof(Timer));
-    } else {
-      memset(&out[i], 0, sizeof(Timer));
     }
   }
   return count;

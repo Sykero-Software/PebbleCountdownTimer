@@ -33,6 +33,10 @@ typedef struct {
   int32_t remaining;    // secs left; valid when IDLE/PAUSED/DONE
   int64_t last_used;    // epoch secs of last user action; drives list order
   bool custom;          // true = created on the watch; preserved across config reconcile until absorbed
+  int32_t run_secs;     // length the CURRENT/most-recent run was started with, seconds. Set on a fresh
+                        // start/restart/snooze (not a pause-resume) and survives expiry (remaining is
+                        // zeroed on expiry), so the finish alarm shows the real run length even when the
+                        // start time was tuned away from `duration`. 0 = never run this session.
 } Timer;
 
 // Parse the TimerConfig string into config-only timers (state IDLE, remaining=
