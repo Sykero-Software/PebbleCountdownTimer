@@ -13,6 +13,7 @@ static Window *s_alarm_window;
 static TextLayer *s_alarm_title;
 static TextLayer *s_alarm_sub;
 static TextLayer *s_alarm_lbl_up;    // "+1 Min" next to the UP button
+static TextLayer *s_alarm_lbl_select;// "+" next to the SELECT button (opens the snooze menu)
 static TextLayer *s_alarm_lbl_down;  // "Stop"  next to the DOWN button
 static int s_alarm_idx = -1;                 // config index the alarm screen is for
 static char s_alarm_title_buf[NAME_LEN + 1]; // big name (or time if unnamed)
@@ -326,13 +327,18 @@ static void layout_alarm_title(void) {
   const int down_top  = h * 78 / 100 - 18;         // top edge of the Stop label
   const int band_top = up_bottom + 2;
   const int band_h   = down_top - band_top - 2;
-  const int box_w = wd - 4;
+  // Reserve a symmetric side margin so the centred title clears the right-edge "+"
+  // (SELECT) label, which sits at the vertical middle of this band. Symmetric so the
+  // text stays screen-centred (only the right side needs clearance, but matching the
+  // left keeps it visually centred).
+  const int side = 22;
+  const int box_w = wd - 2 * side;
   GSize sz;
   GFont tf = alarm_title_font(s_alarm_title_buf, box_w, band_h, &sz);
   const int used_h = sz.h < band_h ? sz.h : band_h;
   const int title_y = band_top + (band_h - used_h) / 2;
   text_layer_set_font(s_alarm_title, tf);
-  layer_set_frame(text_layer_get_layer(s_alarm_title), GRect(2, title_y, box_w, used_h + 4));
+  layer_set_frame(text_layer_get_layer(s_alarm_title), GRect(side, title_y, box_w, used_h + 4));
 }
 
 static void alarm_window_load(Window *w) {
@@ -358,6 +364,16 @@ static void alarm_window_load(Window *w) {
   text_layer_set_text_alignment(s_alarm_lbl_up, GTextAlignmentRight);
   layer_add_child(root, text_layer_get_layer(s_alarm_lbl_up));
   alarm_set_up_label();   // label from the configured quick-snooze length (blank when Off)
+
+  // "+" — big bold, right-aligned, vertically by the SELECT button (~50% h). Hints that
+  // SELECT opens the snooze menu; the title box reserves a side margin so it never overlaps.
+  s_alarm_lbl_select = text_layer_create(GRect(0, h / 2 - 17, wd - 6, 34));
+  text_layer_set_background_color(s_alarm_lbl_select, GColorClear);
+  text_layer_set_text_color(s_alarm_lbl_select, GColorWhite);
+  text_layer_set_font(s_alarm_lbl_select, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_alarm_lbl_select, GTextAlignmentRight);
+  text_layer_set_text(s_alarm_lbl_select, "+");
+  layer_add_child(root, text_layer_get_layer(s_alarm_lbl_select));
 
   // Title — large bold, centred in the band between the +1 Min and Stop labels
   // (timer name, or time if unnamed). The font auto-shrinks for long, wrapping
@@ -387,6 +403,7 @@ static void alarm_window_unload(Window *w) {
   text_layer_destroy(s_alarm_title); s_alarm_title = NULL;
   text_layer_destroy(s_alarm_sub); s_alarm_sub = NULL;
   text_layer_destroy(s_alarm_lbl_up); s_alarm_lbl_up = NULL;
+  text_layer_destroy(s_alarm_lbl_select); s_alarm_lbl_select = NULL;
   text_layer_destroy(s_alarm_lbl_down); s_alarm_lbl_down = NULL;
 }
 
