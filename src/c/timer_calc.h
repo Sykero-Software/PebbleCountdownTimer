@@ -50,6 +50,11 @@ void tc_format_remaining(char *buf, size_t n, int32_t secs);
 // aligns and is easy to compare at a glance. Writes into buf (size n).
 void tc_format_fixed(char *buf, size_t n, int32_t secs);
 
+// Snooze length as a button/menu label: whole minutes -> "5 Min", whole hours ->
+// "1 h". `with_plus` prefixes "+" and capitalises the unit (UP-button quick-snooze
+// label "+5 Min"); otherwise lower-case ("5 min") for the menu. Writes into buf.
+void tc_format_snooze(char *buf, size_t n, int32_t secs, bool with_plus);
+
 // Seconds left to show for a timer at time `now`.
 int32_t tc_remaining_now(const Timer *t, int64_t now);
 

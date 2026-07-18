@@ -239,6 +239,15 @@ int main(void) {
   rs3.duration = 300; rs3.state = TS_DONE;
   tc_extend(&rs3, 120, 500); assert(rs3.run_secs == 120);
 
+  // --- tc_format_snooze: alarm UP-button label (+plus) and menu row (no plus) ---
+  char sb[16];
+  tc_format_snooze(sb, sizeof(sb), 60,   true);  assert(strcmp(sb, "+1 Min") == 0);
+  tc_format_snooze(sb, sizeof(sb), 300,  true);  assert(strcmp(sb, "+5 Min") == 0);
+  tc_format_snooze(sb, sizeof(sb), 2700, true);  assert(strcmp(sb, "+45 Min") == 0);
+  tc_format_snooze(sb, sizeof(sb), 3600, true);  assert(strcmp(sb, "+1 h") == 0);
+  tc_format_snooze(sb, sizeof(sb), 180,  false); assert(strcmp(sb, "3 min") == 0);
+  tc_format_snooze(sb, sizeof(sb), 3600, false); assert(strcmp(sb, "1 h") == 0);
+
   printf("All timer_calc tests passed\n");
   return 0;
 }

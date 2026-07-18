@@ -64,6 +64,17 @@ void tc_format_fixed(char *buf, size_t n, int32_t secs) {
   snprintf(buf, n, "%02d:%02d:%02d", h, m, s);
 }
 
+void tc_format_snooze(char *buf, size_t n, int32_t secs, bool with_plus) {
+  if (secs < 0) { secs = 0; }
+  const char *plus = with_plus ? "+" : "";
+  const char *minu = with_plus ? "Min" : "min";
+  if (secs >= 3600 && secs % 3600 == 0) {
+    snprintf(buf, n, "%s%d h", plus, secs / 3600);
+  } else {
+    snprintf(buf, n, "%s%d %s", plus, secs / 60, minu);
+  }
+}
+
 int32_t tc_remaining_now(const Timer *t, int64_t now) {
   if (t->state == TS_RUNNING) {
     int64_t r = t->end_time - now;
