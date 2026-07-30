@@ -1,1 +1,1 @@
-pebble.trackworktime@sykero.fi
+pebble.countdown@sykero.fi

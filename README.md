@@ -39,7 +39,7 @@ GPL-3.0-only.
 
 ## Support
 
-Questions, feedback or bug reports: <pebble.trackworktime@sykero.fi>
+Questions, feedback or bug reports: <pebble.countdown@sykero.fi>
 
 Browse all Sykerö Software apps on the Pebble appstore:
 <https://apps.repebble.com/apps/dev/syker-software_9f6c9c6e9ce88af6a0db953e>
