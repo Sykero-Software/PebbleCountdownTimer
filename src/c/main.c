@@ -62,9 +62,14 @@ static int64_t now_s(void) { return (int64_t)time(NULL); }
 // Close the app to the WATCHFACE (not the launcher). exit_reason_set tells
 // PebbleOS this was a completed action, so it returns to the watchface; without
 // it window_stack_pop_all lands back wherever the app was launched from.
+// NOTE -- NO WINDOW ANIMATIONS. Every window_stack_push/pop below passes
+// `animated = false`. Reported on real hardware 2026-08-01 (Sykero Smart Alarm,
+// same firmware, same API): every in-app window transition showed a brief broken
+// -looking flash, and removing the slide is what fixed it. The emulator cannot
+// reproduce it, so do not "restore the polish" on the strength of a screenshot.
 static void close_to_watchface(void) {
   exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);
-  window_stack_pop_all(true);
+  window_stack_pop_all(false);
 }
 
 // ---- idle auto-exit: return to the watchface after s_idle_timeout_sec of no
@@ -440,7 +445,7 @@ static void trigger_alarm(int idx, int count) {
     if (s_alarm_title) { text_layer_set_text(s_alarm_title, s_alarm_title_buf); layout_alarm_title(); }
     if (s_alarm_sub) { text_layer_set_text(s_alarm_sub, s_alarm_sub_buf); }
   } else {
-    window_stack_push(s_alarm_window, true);
+    window_stack_push(s_alarm_window, false);
   }
 }
 
@@ -703,7 +708,7 @@ static void open_delete_confirm(void) {
       .load = del_window_load, .unload = del_window_unload });
     window_set_click_config_provider(s_del_window, del_click_config);
   }
-  window_stack_push(s_del_window, true);
+  window_stack_push(s_del_window, false);
 }
 
 // Leaving the detail window: stop the idle timer AND discard an un-started draft
@@ -732,7 +737,7 @@ static void open_detail_window(int timer_idx) {
   if (window_stack_contains_window(s_detail_window)) {
     if (s_detail_menu) { menu_layer_reload_data(s_detail_menu); }
   } else {
-    window_stack_push(s_detail_window, true);
+    window_stack_push(s_detail_window, false);
   }
 }
 
@@ -886,7 +891,7 @@ static void show_start_confirmation(int idx) {
     window_set_window_handlers(s_confirm_window,
       (WindowHandlers){ .load = confirm_window_load, .unload = confirm_window_unload });
   }
-  window_stack_push(s_confirm_window, true);
+  window_stack_push(s_confirm_window, false);
   s_confirm_timer = app_timer_register(1100, confirm_timer_cb, NULL);
 }
 
@@ -1134,7 +1139,7 @@ static void init(void) {
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload,
     .appear = idle_appear, .disappear = idle_disappear });
-  window_stack_push(s_window, true);
+  window_stack_push(s_window, false);
   rebuild_order();
   ensure_ticking();
 
