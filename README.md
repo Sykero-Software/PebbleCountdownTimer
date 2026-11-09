@@ -30,15 +30,14 @@ prerequisites installed, run from this repository on the **host**:
 jailbee init
 jailbee base build          # one-time toolchain image; rebuild after SDK changes
 jailbee new dev
-jailbee shell dev
+jailbee tmux dev
 ```
 
-Inside the container:
-
-```sh
-npm ci
-pebble build
-```
+Development normally happens with Claude Code inside the container. Before
+creating it, enable `agents.claude.enabled` and `agents.claude.autostart`
+in your host's `~/.config/jailbee/global.yaml`; `jailbee tmux dev` then attaches to
+the session running Claude. Ask Claude to make changes and run the project's
+builds and tests.
 
 The committed [configuration](.jailbee/config.yaml) and
 [installer](.jailbee/install.d/45-pebble-sdk.sh) provide Node.js 24,
